@@ -196,7 +196,7 @@ export default function Home() {
             <div className="rating-main">
               <div className="notice">
                 <span>!</span>
-                <div><strong>Evaluación obligatoria antes de cerrar el turno</strong><p>Valora solo conductas que observaste hoy. Si no trabajaste con alguien, informa al jefe de turno.</p></div>
+                <div><strong>Evaluación obligatoria antes de cerrar el turno</strong><p>Valora solo conductas que observaste hoy. A las 23:59, cualquier respuesta pendiente se completará automáticamente con el promedio válido del turno.</p></div>
                 <b>{completion}%</b>
               </div>
               <div className="section-heading">
@@ -250,6 +250,7 @@ export default function Home() {
               </button>
               {submitted && <div className="success-message">✓ Valoración enviada. Gracias por reconocer a tu equipo.</div>}
               <small className="lock-note">▣ Una vez enviada, solo un administrador puede reabrirla.</small>
+              <div className="auto-close-note"><strong>◷ Cierre automático · 23:59</strong><span>Lo que no completes se registrará como “Promedio automático” y contará como una omisión.</span></div>
             </aside>
           </section>
         )}
@@ -304,7 +305,7 @@ export default function Home() {
             </section>
             <section className="metric-grid admin">
               <article><div className="metric-icon coral">★</div><div><span>Promedio del equipo</span><strong>4.72</strong><small>↑ 0.14 vs. junio</small></div></article>
-              <article><div className="metric-icon olive">✓</div><div><span>Cumplimiento diario</span><strong>94%</strong><small>226 de 240 completas</small></div></article>
+              <article><div className="metric-icon olive">✓</div><div><span>Cumplimiento diario</span><strong>94%</strong><small>226 manuales · 14 automáticas</small></div></article>
               <article><div className="metric-icon gold">$</div><div><span>Bonos proyectados</span><strong>$175.000</strong><small>7 trabajadores elegibles</small></div></article>
               <article><div className="metric-icon blue">!</div><div><span>Alertas por revisar</span><strong>3</strong><small>Patrones atípicos detectados</small></div></article>
             </section>
@@ -318,6 +319,11 @@ export default function Home() {
                 <div className="alert-row"><span>↔</span><div><strong>Patrón de valoración recíproca</strong><p>2 trabajadores se califican siempre con 5 estrellas.</p></div></div>
                 <div className="alert-row"><span>↓</span><div><strong>Cambio brusco de puntuación</strong><p>Una valoración difiere 2.1 puntos del promedio.</p></div></div>
               </article>
+            </section>
+            <section className="autofill-panel">
+              <div className="autofill-icon">◷</div>
+              <div><span className="section-kicker">REGLA OBLIGATORIA ACTIVA</span><h3>Cierre automático de omisiones</h3><p>A las 23:59, cada criterio pendiente recibe el promedio válido que ese compañero obtuvo durante el mismo turno. El registro queda identificado como automático y la omisión se acumula en el historial del evaluador.</p></div>
+              <div className="autofill-stats"><span><strong>14</strong> respuestas automáticas hoy</span><span><strong>4</strong> trabajadores con omisión</span></div>
             </section>
             <section className="panel leaderboard">
               <div className="panel-head"><div><span className="section-kicker">PROMEDIO MENSUAL</span><h3>Resumen general de trabajadores</h3></div><button className="text-button" onClick={() => setView("resultados")}>Abrir informe completo →</button></div>
@@ -346,7 +352,7 @@ export default function Home() {
             </div>
             <div className="admin-grid">
               <article className="panel"><div className="panel-head"><h3>Promedio por sección</h3></div>{[["Salón", "4.70", "94%"], ["Barra", "4.75", "95%"], ["Cocina", "4.73", "95%"]].map(([label, value, width]) => <div className="section-average" key={label}><span>{label}</span><div className="mini-progress"><i style={{width}} /></div><strong>{value}</strong></div>)}</article>
-              <article className="panel fairness"><div className="panel-head"><h3>Reglas aplicadas al promedio</h3></div><ul><li>✓ Mínimo 10 evaluaciones válidas</li><li>✓ Sin autoevaluaciones</li><li>✓ Atípicos extremos quedan en revisión</li><li>✓ Evaluadores siempre anónimos</li></ul></article>
+              <article className="panel fairness"><div className="panel-head"><h3>Reglas aplicadas al promedio</h3></div><ul><li>✓ Mínimo 10 evaluaciones válidas</li><li>✓ Sin autoevaluaciones</li><li>✓ Atípicos extremos quedan en revisión</li><li>✓ Evaluadores siempre anónimos</li><li>◷ Notas automáticas identificadas</li><li>! Omisiones registradas por trabajador</li></ul></article>
             </div>
           </section>
         )}
@@ -359,6 +365,7 @@ export default function Home() {
             </section>
             <section className="rules-list">
               {[
+                ["Cierre automático por omisión", "Pendientes a las 23:59 reciben el promedio del mismo turno", "Promedio automático", "14 aplicadas hoy", "Activa"],
                 ["Aumento porcentual de propinas", "Promedio ≥ 4.70", "+3%", "7 elegibles", "Activa"],
                 ["Bono en efectivo o tarjeta", "Promedio ≥ 4.80 + cumplimiento ≥ 95%", "$25.000", "3 elegibles", "Activa"],
                 ["Descanso adicional pagado", "24 días de evaluaciones completas", "60 minutos", "5 elegibles", "Activa"],
@@ -367,7 +374,7 @@ export default function Home() {
                 <article key={title}><span className="rule-icon">★</span><div className="rule-copy"><h3>{title}</h3><p>{condition}</p></div><div><small>BENEFICIO</small><strong>{benefit}</strong></div><div><small>PROYECCIÓN</small><strong>{eligible}</strong></div><span className={status === "Activa" ? "status complete" : "status pending"}>{status}</span><button className="icon-button">•••</button></article>
               ))}
             </section>
-            <div className="policy-note"><span>i</span><div><strong>Recomendación de equidad</strong><p>Las estrellas deben aportar al bono, pero no decidirlo solas. Confirma asistencia, cumplimiento de funciones y ausencia de sanciones antes de aprobar un pago.</p></div></div>
+            <div className="policy-note"><span>i</span><div><strong>Cómo funciona el castigo por omisión</strong><p>La nota automática mantiene completo el día, pero no se presenta como opinión del trabajador. Cada omisión queda en su historial y puede reducir su elegibilidad para bonos por cumplimiento.</p></div></div>
           </>
         )}
       </section>
