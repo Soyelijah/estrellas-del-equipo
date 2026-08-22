@@ -184,6 +184,25 @@ test("updates, suspends, reactivates, and resets only a worker in the administra
   assert.deepEqual(await repository.setManagedUserStatus({ userId: "11111111-1111-4111-8111-111111111111", organizationId: "other-org", actorMembershipId: "membership-admin", status: "suspended", auditId: "audit-other", now: "2026-08-22T15:00:00.000Z" }), { updated: false });
 });
 
+test("lists sanitized audit events newest first and scoped to one organization", async () => {
+  const { repository } = createEmptyAdminFixture();
+  await repository.saveBootstrap({
+    organization: { id: "org-1", name: "Restaurante", createdAt: "2026-08-22T12:00:00.000Z" },
+    user: { id: "admin-1", authSubject: "local:admin-1", displayName: "Jefe", loginIdentifier: "jefe", passwordHash: "admin-hash", status: "active", createdAt: "2026-08-22T12:00:00.000Z" },
+    membership: { id: "membership-admin", organizationId: "org-1", userId: "admin-1", role: "admin", joinedAt: "2026-08-22T12:00:00.000Z" },
+    guard: { key: "administrator_bootstrap", createdAt: "2026-08-22T12:00:00.000Z" },
+  });
+  await repository.createManagedUser({
+    user: { id: "worker-1", authSubject: "local:worker-1", displayName: "Garzón", loginIdentifier: "garzon", passwordHash: "secret-hash", jobTitle: "waiter", status: "active", createdAt: "2026-08-22T13:00:00.000Z" },
+    membership: { id: "membership-worker", organizationId: "org-1", userId: "worker-1", role: "worker", joinedAt: "2026-08-22T13:00:00.000Z", createdByMembershipId: "membership-admin", tipFactorHundredths: 65 },
+  });
+  const events = await repository.listAuditEvents("org-1", 50);
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0], { id: events[0].id, action: "user.created", objectType: "user", objectId: "worker-1", reason: null, metadata: { jobTitle: "waiter" }, createdAt: "2026-08-22T13:00:00.000Z", actorDisplayName: "Jefe" });
+  assert.equal(JSON.stringify(events).includes("secret-hash"), false);
+  assert.deepEqual(await repository.listAuditEvents("other-org", 50), []);
+});
+
 test("loads the active membership bound to the authenticated subject", async () => {
   const { repository } = createFixture();
 

@@ -225,4 +225,29 @@ export class D1AdminAuthRepository {
     `).bind(organizationId).all<{ id: string; displayName: string; loginIdentifier: string; status: string; role: string; jobTitle: string; tipFactorHundredths: number }>();
     return rows.results;
   }
+
+  async listAuditEvents(organizationId: string, limit: number) {
+    const boundedLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
+    const rows = await this.database.prepare(`
+      SELECT a.id, a.action, a.object_type AS objectType, a.object_id AS objectId,
+        a.reason, a.metadata_json AS metadataJson, a.created_at AS createdAt,
+        actor.display_name AS actorDisplayName
+      FROM audit_events a
+      LEFT JOIN memberships actor_membership ON actor_membership.id = a.actor_membership_id
+      LEFT JOIN users actor ON actor.id = actor_membership.user_id
+      WHERE a.organization_id = ?
+      ORDER BY a.created_at DESC, a.id DESC
+      LIMIT ?
+    `).bind(organizationId, boundedLimit).all<{ id: string; action: string; objectType: string; objectId: string; reason: string | null; metadataJson: string; createdAt: string; actorDisplayName: string | null }>();
+    return rows.results.map(({ metadataJson, ...event }) => {
+      let metadata: Record<string, unknown> = {};
+      try {
+        const parsed: unknown = JSON.parse(metadataJson);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metadata = parsed as Record<string, unknown>;
+      } catch {
+        metadata = {};
+      }
+      return { ...event, metadata };
+    });
+  }
 }

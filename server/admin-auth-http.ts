@@ -20,6 +20,7 @@ type AuthDependencies = {
     findSessionActor(tokenHash: string, now: string): Promise<{ userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string } | null>;
     revokeSession(tokenHash: string, now: string): Promise<void>;
     listOrganizationUsers(organizationId: string): Promise<unknown[]>;
+    listAuditEvents(organizationId: string, limit: number): Promise<unknown[]>;
   };
   createId(): string;
   createToken(): string;
@@ -100,6 +101,15 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         account: actor ? { displayName: actor.displayName, role: actor.role } : null,
         users,
       });
+    }
+
+    if (path === "/api/admin/audit" && request.method === "GET") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      if (actor.role !== "admin") return json({ ok: false, error: "admin_required" }, 403);
+      const requestedLimit = Number(new URL(request.url).searchParams.get("limit") ?? 50);
+      const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(50, requestedLimit)) : 50;
+      return json({ ok: true, events: await dependencies.repository.listAuditEvents(actor.organizationId, limit) });
     }
 
     if (request.method !== "POST" && request.method !== "PATCH") return json({ ok: false, error: "method_not_allowed" }, 405, { allow: "GET, POST, PATCH" });

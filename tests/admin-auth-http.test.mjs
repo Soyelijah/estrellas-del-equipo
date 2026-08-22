@@ -27,6 +27,7 @@ function dependencies(overrides = {}) {
       async findSessionActor() { return null; },
       async revokeSession() {},
       async listOrganizationUsers() { return []; },
+      async listAuditEvents() { return []; },
       ...repositoryOverrides,
     },
     createId: (() => { let id = 0; return () => `id-${++id}`; })(),
@@ -160,4 +161,23 @@ test("rejects malformed worker resource identifiers before repository mutation",
   const response = await handleAdminAuthRequest(mutation("/api/admin/users/not-an-id/status", { status: "suspended" }, { cookie: "estrellas_session=private-cookie-token" }), dependencies({ repository: { async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m1" }; } } }));
   assert.equal(response.status, 404);
   assert.deepEqual(await response.json(), { ok: false, error: "not_found" });
+});
+
+test("returns a bounded organization audit timeline only to the administrator", async () => {
+  const events = [{ id: "a1", action: "user.created", objectType: "user", objectId: "u1", reason: null, metadata: {}, createdAt: "2026-08-22T14:00:00.000Z", actorDisplayName: "Jefe" }];
+  const adminRepository = {
+    async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m1" }; },
+    async listAuditEvents(organizationId, limit) { assert.equal(organizationId, "o1"); assert.equal(limit, 50); return events; },
+  };
+  const authorized = await handleAdminAuthRequest(new Request("https://equipo.example/api/admin/audit?limit=999", { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository: adminRepository }));
+  const unauthorized = await handleAdminAuthRequest(new Request("https://equipo.example/api/admin/audit"), dependencies());
+  assert.equal(authorized.status, 200);
+  assert.deepEqual(await authorized.json(), { ok: true, events });
+  assert.equal(unauthorized.status, 401);
+});
+
+test("forbids a worker from reading administrative audit events", async () => {
+  const response = await handleAdminAuthRequest(new Request("https://equipo.example/api/admin/audit", { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository: { async findSessionActor() { return { userId: "worker", displayName: "Garzón", role: "worker", organizationId: "o1", membershipId: "mw" }; } } }));
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { ok: false, error: "admin_required" });
 });
