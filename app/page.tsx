@@ -1,381 +1,266 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { allocateTipPoolByExperienceFactors, formatExperienceFactor } from "../domain/tips";
 
-type Role = "worker" | "admin";
-type View = "inicio" | "valorar" | "resultados" | "recompensas";
-type RatingMap = Record<string, Record<string, number>>;
+type View = "inicio" | "equipo" | "evaluaciones" | "acuerdo";
+type Account = { displayName: string; role: string };
+type StoredUser = { id: string; displayName: string; loginIdentifier: string; status: string; role: string; jobTitle: keyof typeof jobTitles; tipFactorHundredths: number };
+type AuthState = { loading: boolean; bootstrapAllowed: boolean; setupUnlocked: boolean; account: Account | null; users: StoredUser[]; unavailable: boolean };
 
-const colleagues = [
-  { id: "maria", name: "María López", role: "Garzona", shift: "Salón", initials: "ML", color: "coral" },
-  { id: "carlos", name: "Carlos Ramírez", role: "Bartender", shift: "Barra", initials: "CR", color: "olive" },
-  { id: "ana", name: "Ana Torres", role: "Cocina", shift: "Cocina", initials: "AT", color: "gold" },
-  { id: "diego", name: "Diego Soto", role: "Runner", shift: "Salón", initials: "DS", color: "blue" },
-];
+const jobTitles = {
+  head_waiter: "Jefe de garzones",
+  waiter: "Garzón",
+  bartender: "Barman",
+  cashier: "Cajera",
+} as const;
+const clpFormatter = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
 
-const criteria = [
-  { id: "team", label: "Trabajo en equipo", hint: "Coopera y aporta al objetivo común" },
-  { id: "attitude", label: "Actitud", hint: "Mantiene respeto y buena disposición" },
-  { id: "support", label: "Apoyo en turno", hint: "Ayuda cuando el equipo lo necesita" },
-  { id: "service", label: "Calidad de servicio", hint: "Cuida cada detalle con el cliente" },
-];
-
-const monthly = [
-  { name: "María López", initials: "ML", section: "Salón", team: 4.9, attitude: 4.8, support: 4.9, service: 4.7, total: 4.83, status: "Premiable" },
-  { name: "Carlos Ramírez", initials: "CR", section: "Barra", team: 4.7, attitude: 4.9, support: 4.6, service: 4.8, total: 4.75, status: "Premiable" },
-  { name: "Ana Torres", initials: "AT", section: "Cocina", team: 4.8, attitude: 4.6, support: 4.8, service: 4.7, total: 4.73, status: "En curso" },
-  { name: "Diego Soto", initials: "DS", section: "Salón", team: 4.4, attitude: 4.5, support: 4.7, service: 4.5, total: 4.53, status: "En curso" },
-  { name: "Daniela Rojas", initials: "DR", section: "Salón", team: 4.7, attitude: 4.8, support: 4.6, service: 4.9, total: 4.75, status: "Premiable" },
-];
-
-function StarRating({ value, onChange, label }: { value: number; onChange: (value: number) => void; label: string }) {
-  return (
-    <div className="stars" role="radiogroup" aria-label={label}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          className={star <= value ? "star active" : "star"}
-          onClick={() => onChange(star)}
-          role="radio"
-          aria-checked={star === value}
-          aria-label={`${star} de 5`}
-        >
-          ★
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ProgressRing({ value }: { value: number }) {
-  return (
-    <div className="progress-ring" style={{ "--progress": `${value * 3.6}deg` } as React.CSSProperties}>
-      <span>{value}%</span>
-    </div>
-  );
+function initials(label: string) {
+  return label.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 }
 
 export default function Home() {
-  const [role, setRole] = useState<Role>("worker");
   const [view, setView] = useState<View>("inicio");
-  const [ratings, setRatings] = useState<RatingMap>({
-    maria: { team: 5, attitude: 4, support: 5, service: 0 },
-  });
-  const [submitted, setSubmitted] = useState(false);
-  const [selectedSection, setSelectedSection] = useState("Todas");
+  const [tipPoolPesos, setTipPoolPesos] = useState(0);
+  const [auth, setAuth] = useState<AuthState>({ loading: true, bootstrapAllowed: false, setupUnlocked: false, account: null, users: [], unavailable: false });
+  const [accountMessage, setAccountMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const completed = useMemo(
-    () => colleagues.filter((person) => criteria.every((criterion) => (ratings[person.id]?.[criterion.id] ?? 0) > 0)).length,
-    [ratings],
+  async function refreshAuth() {
+    try {
+      const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error("unavailable");
+      const data = await response.json() as Omit<AuthState, "loading" | "unavailable">;
+      setAuth({ loading: false, bootstrapAllowed: data.bootstrapAllowed, setupUnlocked: data.setupUnlocked, account: data.account, users: data.users, unavailable: false });
+    } catch {
+      setAuth((current) => ({ ...current, loading: false, unavailable: true }));
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("unavailable");
+        return response.json() as Promise<Omit<AuthState, "loading" | "unavailable">>;
+      })
+      .then((data) => {
+        if (active) setAuth({ loading: false, bootstrapAllowed: data.bootstrapAllowed, setupUnlocked: data.setupUnlocked, account: data.account, users: data.users, unavailable: false });
+      })
+      .catch(() => {
+        if (active) setAuth((current) => ({ ...current, loading: false, unavailable: true }));
+      });
+    return () => { active = false; };
+  }, []);
+
+  async function submitAccount(event: FormEvent<HTMLFormElement>, path: string) {
+    event.preventDefault();
+    setSubmitting(true);
+    setAccountMessage("");
+    const form = event.currentTarget;
+    const body = Object.fromEntries(new FormData(form));
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json() as { ok: boolean; error?: string };
+      if (!response.ok) {
+        const messages: Record<string, string> = {
+          invalid_account_data: "Revisa los datos. El usuario debe tener al menos 3 caracteres y la contraseña al menos 12.",
+          invalid_credentials: "Usuario o contraseña incorrectos.",
+          login_identifier_exists: "Ese usuario ya existe.",
+          bootstrap_closed: "La cuenta administradora ya fue activada.",
+          invalid_access_key: "La clave de acceso no es válida.",
+          setup_access_required: "Valida primero la clave única de activación.",
+          setup_access_unavailable: "La clave única todavía no está configurada en el servidor.",
+        };
+        setAccountMessage(messages[result.error ?? ""] ?? "No fue posible guardar la cuenta.");
+        return;
+      }
+      form.reset();
+      setAccountMessage(path === "/api/admin/users" ? "Cuenta creada y guardada en la base de datos." : path === "/api/auth/bootstrap/unlock" ? "Clave validada. Completa ahora la cuenta administradora." : path === "/api/auth/bootstrap" ? "Cuenta creada. Inicia sesión para entrar." : "Sesión iniciada.");
+      await refreshAuth();
+    } catch {
+      setAccountMessage("No se pudo conectar con la base de datos local.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" });
+    setAccountMessage("");
+    await refreshAuth();
+  }
+  const realTeam = auth.users;
+  const totalFactorHundredths = realTeam.reduce((sum, member) => sum + member.tipFactorHundredths, 0);
+  const evaluatorCount = realTeam.length;
+  const evaluationSubjectCount = realTeam.filter(({ jobTitle }) => jobTitle !== "cashier").length;
+  const tipSimulation = useMemo(
+    () => realTeam.length === 0 ? [] : allocateTipPoolByExperienceFactors(
+      tipPoolPesos,
+      realTeam.map(({ id, tipFactorHundredths }) => ({ participantId: id, factorHundredths: tipFactorHundredths })),
+    ),
+    [tipPoolPesos, realTeam],
   );
-  const totalFields = colleagues.length * criteria.length;
-  const ratedFields = Object.values(ratings).reduce(
-    (sum, person) => sum + criteria.filter((criterion) => (person[criterion.id] ?? 0) > 0).length,
-    0,
-  );
-  const completion = Math.round((ratedFields / totalFields) * 100);
 
-  const setRating = (person: string, criterion: string, value: number) => {
-    setSubmitted(false);
-    setRatings((current) => ({
-      ...current,
-      [person]: { ...(current[person] ?? {}), [criterion]: value },
-    }));
-  };
+  if (auth.loading) {
+    return (
+      <main className="access-shell access-loading" aria-busy="true">
+        <div className="access-brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div>
+        <p>Preparando el acceso…</p>
+      </main>
+    );
+  }
 
-  const filteredMonthly = selectedSection === "Todas"
-    ? monthly
-    : monthly.filter((person) => person.section === selectedSection);
+  if (auth.unavailable) {
+    return (
+      <main className="access-shell">
+        <div className="access-brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div>
+        <section className="access-problem" role="alert"><span>!</span><h1>No se pudo abrir el acceso</h1><p>La base de datos local no está respondiendo. Reinicia el servidor y vuelve a intentarlo.</p><button className="primary" onClick={() => void refreshAuth()}>Volver a intentar</button></section>
+      </main>
+    );
+  }
 
-  const changeRole = (nextRole: Role) => {
-    setRole(nextRole);
-    setView("inicio");
-  };
+  if (!auth.account) {
+    return (
+      <main className="access-shell premium-access">
+        <div className="access-aurora" aria-hidden="true" />
+        <div className="access-constellation" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <i key={index} />)}</div>
+        <header className="access-header"><div className="access-brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div><span>Acceso del equipo</span></header>
+        <section className="access-stage">
+          <div className="access-intro">
+            <span className="access-kicker">{auth.bootstrapAllowed ? "Apertura protegida" : "Bienvenido de vuelta"}</span>
+            <h1>{auth.bootstrapAllowed ? "La puerta del equipo se abre una sola vez." : "Tu jornada empieza aquí."}</h1>
+            <p>{auth.bootstrapAllowed ? "Primero valida la clave única del sistema. Después podrás registrar la cuenta de quien administrará el equipo." : "Entra con tu cuenta personal. Tu identidad mantiene cada acción y evaluación correctamente atribuida."}</p>
+            <div className="access-trust"><span>Contraseña protegida</span><span>Sesión privada</span><span>Una cuenta por persona</span></div>
+          </div>
+          {auth.bootstrapAllowed && !auth.setupUnlocked ? (
+            <form className="access-form setup-key-form" onSubmit={(event) => void submitAccount(event, "/api/auth/bootstrap/unlock")} aria-labelledby="setup-key-title">
+              <div className="access-form-heading"><span className="form-emblem">✦</span><div><span className="section-kicker">PASO 1 DE 2</span><h2 id="setup-key-title">Clave única de acceso</h2><p>Solo quien posea esta clave puede abrir el registro administrativo.</p></div></div>
+              <label>Clave de activación<div className="secret-input"><input name="accessKey" type={showPassword ? "text" : "password"} required minLength={20} maxLength={200} autoComplete="one-time-code" autoFocus /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Ocultar clave" : "Mostrar clave"}>{showPassword ? "Ocultar" : "Ver"}</button></div></label>
+              <div className="key-assurance"><span>Uso único</span><span>Validación en servidor</span><span>No se guarda en el navegador</span></div>
+              <button className="access-submit" disabled={submitting}><span>{submitting ? "Validando…" : "Validar y continuar"}</span><b>→</b></button>
+              {accountMessage && <p className="form-message" role="status">{accountMessage}</p>}
+            </form>
+          ) : auth.bootstrapAllowed ? (
+            <form className="access-form" onSubmit={(event) => void submitAccount(event, "/api/auth/bootstrap")} aria-labelledby="bootstrap-title">
+              <div className="access-form-heading"><span className="form-emblem success-emblem">✓</span><div><span className="section-kicker">PASO 2 DE 2</span><h2 id="bootstrap-title">Cuenta administradora</h2><p>Clave validada. Esta activación se cerrará al guardar.</p></div></div>
+              <label>Nombre del restaurante<input name="organizationName" required minLength={2} maxLength={120} autoComplete="organization" /></label>
+              <label>Tu nombre o alias<input name="displayName" required minLength={2} maxLength={100} autoComplete="name" /></label>
+              <label>Usuario<input name="loginIdentifier" required minLength={3} maxLength={80} autoComplete="username" spellCheck={false} /></label>
+              <label>Contraseña<div className="secret-input"><input name="password" type={showPassword ? "text" : "password"} required minLength={12} maxLength={128} autoComplete="new-password" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>{showPassword ? "Ocultar" : "Ver"}</button></div></label>
+              <small>Usa al menos 12 caracteres y no compartas esta contraseña.</small>
+              <button className="access-submit" disabled={submitting}><span>{submitting ? "Creando cuenta…" : "Crear cuenta administradora"}</span><b>→</b></button>
+              {accountMessage && <p className="form-message" role="status">{accountMessage}</p>}
+            </form>
+          ) : (
+            <form className="access-form" onSubmit={(event) => void submitAccount(event, "/api/auth/login")} aria-labelledby="login-title">
+              <div className="access-form-heading"><span className="form-emblem">☆</span><div><span className="section-kicker">ACCESO PERSONAL</span><h2 id="login-title">Iniciar sesión</h2><p>Tu usuario identifica tus evaluaciones y acciones.</p></div></div>
+              <label>Usuario<input name="loginIdentifier" required autoComplete="username" autoFocus /></label>
+              <label>Contraseña<div className="secret-input"><input name="password" type={showPassword ? "text" : "password"} required autoComplete="current-password" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>{showPassword ? "Ocultar" : "Ver"}</button></div></label>
+              <button className="access-submit" disabled={submitting}><span>{submitting ? "Comprobando acceso…" : "Entrar al sistema"}</span><b>→</b></button>
+              {accountMessage && <p className="form-message" role="status">{accountMessage}</p>}
+            </form>
+          )}
+        </section>
+        <footer className="access-footer"><span>Uso interno del equipo</span><span>Los resultados solo se generan con registros reales.</span></footer>
+      </main>
+    );
+  }
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">☆</span>
-          <div><strong>Estrellas</strong><span>del Equipo</span></div>
-        </div>
-
-        <div className="role-switch" aria-label="Vista de demostración">
-          <button className={role === "worker" ? "active" : ""} onClick={() => changeRole("worker")}>Trabajador</button>
-          <button className={role === "admin" ? "active" : ""} onClick={() => changeRole("admin")}>Administrador</button>
-        </div>
-
-        <nav>
+        <div className="brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div>
+        <nav aria-label="Navegación principal">
           <button className={view === "inicio" ? "active" : ""} onClick={() => setView("inicio")}><span>⌂</span>Inicio</button>
-          {role === "worker" && (
-            <>
-              <button className={view === "valorar" ? "active" : ""} onClick={() => setView("valorar")}><span>☆</span>Valoración diaria <b>{completed}/{colleagues.length}</b></button>
-              <button className={view === "resultados" ? "active" : ""} onClick={() => setView("resultados")}><span>◌</span>Mis resultados</button>
-              <button className={view === "recompensas" ? "active" : ""} onClick={() => setView("recompensas")}><span>♢</span>Recompensas</button>
-            </>
-          )}
-          {role === "admin" && (
-            <>
-              <button className={view === "resultados" ? "active" : ""} onClick={() => setView("resultados")}><span>▦</span>Equipo y promedios</button>
-              <button className={view === "recompensas" ? "active" : ""} onClick={() => setView("recompensas")}><span>♢</span>Reglas y bonos</button>
-            </>
-          )}
+          <button className={view === "equipo" ? "active" : ""} onClick={() => setView("equipo")}><span>♙</span>Equipo</button>
+          <button className={view === "evaluaciones" ? "active" : ""} onClick={() => setView("evaluaciones")}><span>☆</span>Evaluaciones</button>
+          <button className={view === "acuerdo" ? "active" : ""} onClick={() => setView("acuerdo")}><span>♢</span>Propinas</button>
         </nav>
-
-        <div className="sidebar-note">
-          <span>Privado y respetuoso</span>
-          <p>Las opiniones individuales nunca muestran quién valoró a quién.</p>
-        </div>
-        <div className="profile">
-          <div className="avatar small">{role === "admin" ? "JS" : "DR"}</div>
-          <div><strong>{role === "admin" ? "Javier Silva" : "Daniela Rojas"}</strong><span>{role === "admin" ? "Jefe · Administrador" : "Garzona · Turno PM"}</span></div>
-          <button aria-label="Abrir menú de cuenta">•••</button>
-        </div>
+        <div className="sidebar-note verified-note"><span>Datos reales</span><p>El equipo y sus factores se muestran únicamente después de guardarlos en la base de datos.</p></div>
+        <div className="profile pending-profile"><div className="avatar small neutral-avatar">{auth.account ? initials(auth.account.displayName) : "—"}</div><div><strong>{auth.account?.displayName ?? "Sin sesión iniciada"}</strong><span>{auth.account ? (auth.account.role === "admin" ? "Administrador" : "Trabajador") : "Acceso personal"}</span></div>{auth.account && <button className="logout-button" onClick={() => void logout()}>Salir</button>}</div>
       </aside>
 
       <section className="content">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">{role === "admin" ? "Panel de administración" : "Domingo, 26 de julio · Turno PM"}</p>
-            <h1>{role === "admin" ? "Resumen del equipo" : view === "valorar" ? "Valoración diaria" : `Buenas tardes, Daniela`}</h1>
-          </div>
-          <div className="top-actions">
-            <button className="icon-button" aria-label="Notificaciones">♢<i /></button>
-            {role === "worker" && view !== "valorar" && <button className="primary" onClick={() => setView("valorar")}>★ Valorar ahora</button>}
-            {role === "admin" && <button className="outline">↓ Exportar informe</button>}
-          </div>
-        </header>
+        <div className="data-banner" role="status"><strong>{auth.account ? "Sesión real activa" : "Configuración confirmada"}</strong><span>{auth.account ? `${auth.account.displayName} está conectado a la base de datos.` : "Sin puntajes, turnos, identidades ni recompensas inventadas."}</span></div>
+        <header className="topbar"><div><p className="eyebrow">ESTADO REAL DEL SISTEMA</p><h1>Equipo y acuerdo de propinas</h1></div><span className="status neutral">Configuración inicial</span></header>
 
-        {role === "worker" && view === "inicio" && (
+        {view === "inicio" && (
           <>
-            <section className="hero">
+            <section className="hero real-data-hero">
               <div className="hero-copy">
-                <span className="pill olive">Reconocimiento diario</span>
-                <h2>Tu opinión hace crecer al equipo.</h2>
-                <p>Antes de cerrar tu turno, valora a cada compañero con quien trabajaste hoy. Son 4 criterios, toma menos de 3 minutos.</p>
-                <button className="primary" onClick={() => setView("valorar")}>{completed === colleagues.length ? "Revisar valoración" : "Completar valoración"} <span>→</span></button>
-                <div className="privacy-line"><span>✓</span> Resultados anónimos · Sin autoevaluación · Promedio mensual</div>
+                <span className="pill olive">Base acordada lista</span>
+                <h2>Primero la verdad de los datos.</h2>
+                <p>La aplicación conserva únicamente los cargos, permisos de evaluación y factores de experiencia confirmados. Hasta que existan cuentas y turnos reales, no se mostrarán evaluaciones ni resultados.</p>
+                <button className="primary" onClick={() => setView("equipo")}>Revisar configuración <span>→</span></button>
+                <div className="privacy-line"><span>✓</span> Sin notas simuladas · Sin rankings ficticios · Sin consecuencias automáticas</div>
               </div>
-              <div className="hero-visual">
-                {/* Vinext serves this local production asset directly. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/equipo-restaurante.png"
-                  alt="Equipo de un restaurante reunido al final de su turno"
-                />
-                <div className="floating-card"><strong>{completed} de {colleagues.length}</strong><span>compañeros listos hoy</span></div>
+              <div className="setup-card">
+                <span className="setup-icon">◎</span><strong>Falta activar la operación</strong>
+                <p>Se deben crear las cuentas, registrar un turno y abrir un período antes de evaluar.</p>
+                <div className="setup-steps"><span className="done">✓ Acuerdo del equipo</span><span>○ Cuentas personales</span><span>○ Primer turno</span><span>○ Primera evaluación</span></div>
               </div>
             </section>
-
-            <section className="metric-grid">
-              <article><div className="metric-icon coral">★</div><div><span>Mi promedio mensual</span><strong>4.75</strong><small>↑ 0.18 vs. junio</small></div></article>
-              <article><div className="metric-icon olive">✓</div><div><span>Días completados</span><strong>22 / 24</strong><small>92% de cumplimiento</small></div></article>
-              <article><div className="metric-icon gold">$</div><div><span>Bono proyectado</span><strong>+3%</strong><small>Propina del mes</small></div></article>
-              <article><div className="metric-icon blue">◷</div><div><span>Descanso ganado</span><strong>40 min</strong><small>Faltan 20 min</small></div></article>
+            <section className="metric-grid real-metrics">
+              <article><div className="metric-icon coral">♙</div><div><span>Trabajadores registrados</span><strong>{realTeam.length}</strong><small>Cuentas creadas por ti</small></div></article>
+              <article><div className="metric-icon olive">✓</div><div><span>Pueden evaluar</span><strong>{evaluatorCount}</strong><small>Según cuentas activas</small></div></article>
+              <article><div className="metric-icon blue">☆</div><div><span>Pueden ser evaluados</span><strong>{evaluationSubjectCount}</strong><small>La cajera queda fuera</small></div></article>
+              <article><div className="metric-icon gold">◎</div><div><span>Factores totales</span><strong>{formatExperienceFactor(totalFactorHundredths)}</strong><small>Puntos de experiencia</small></div></article>
             </section>
-
             <section className="two-column">
-              <article className="panel">
-                <div className="panel-head"><div><span className="section-kicker">HOY</span><h3>Tu tarea pendiente</h3></div><span className="status pending">Obligatoria</span></div>
-                <div className="task-row">
-                  <ProgressRing value={completion} />
-                  <div><strong>Valoración del turno PM</strong><p>{ratedFields} de {totalFields} respuestas completadas</p><div className="mini-progress"><i style={{ width: `${completion}%` }} /></div></div>
-                  <button className="text-button" onClick={() => setView("valorar")}>Continuar →</button>
-                </div>
-              </article>
-              <article className="panel">
-                <div className="panel-head"><div><span className="section-kicker">ESTE MES</span><h3>Tu próxima recompensa</h3></div></div>
-                <div className="reward-compact"><span className="reward-icon">♛</span><div><strong>Empleado del mes</strong><p>Estás entre los 3 mejores puntajes elegibles</p></div><span className="big-score">4.75</span></div>
-              </article>
+              <article className="panel empty-summary"><div className="panel-head"><div><span className="section-kicker">EVALUACIONES</span><h3>Aún no hay evaluaciones registradas</h3></div></div><p>Cuando un usuario real complete una evaluación correspondiente a un turno registrado, su estado aparecerá aquí. No se calcula ningún resultado con datos de ejemplo.</p></article>
+              <article className="panel empty-summary"><div className="panel-head"><div><span className="section-kicker">ACTIVACIÓN</span><h3>Datos necesarios para comenzar</h3></div></div><ul className="clean-list"><li>Nombre o alias definitivo de cada trabajador.</li><li>Cuenta personal y acceso seguro.</li><li>Fecha, horario y participantes del turno.</li><li>Período y criterios aprobados.</li></ul></article>
             </section>
           </>
         )}
 
-        {role === "worker" && view === "valorar" && (
-          <section className="rating-layout">
-            <div className="rating-main">
-              <div className="notice">
-                <span>!</span>
-                <div><strong>Evaluación obligatoria antes de cerrar el turno</strong><p>Valora solo conductas que observaste hoy. A las 23:59, cualquier respuesta pendiente se completará automáticamente con el promedio válido del turno.</p></div>
-                <b>{completion}%</b>
+        {view === "equipo" && (
+          <section className="data-section">
+            <div className="section-heading"><div><p className="eyebrow">REGISTROS DE LA BASE DE DATOS</p><h2>Equipo</h2><span>Solo aparecen las cuentas que tú hayas creado con sus datos y factor acordado.</span></div><span className="status complete">{realTeam.length} trabajadores</span></div>
+            {realTeam.length === 0 ? <div className="empty-state compact-empty" role="status"><span className="empty-icon">♙</span><h3>Aún no has agregado trabajadores</h3><p>Crea la primera cuenta con su nombre, cargo, credenciales y porcentaje de experiencia.</p></div> : <div className="team-table-wrap"><table className="team-table"><caption>Trabajadores reales guardados</caption><thead><tr><th scope="col">Trabajador</th><th scope="col">Cargo</th><th scope="col">Factor</th><th scope="col">Evalúa</th><th scope="col">Es evaluado</th></tr></thead><tbody>
+              {realTeam.map((member) => { const canBeEvaluated = member.jobTitle !== "cashier"; return <tr key={member.id}><td><span className="avatar tiny">{initials(member.displayName)}</span><strong>{member.displayName}</strong></td><td>{jobTitles[member.jobTitle]}</td><td><strong>{formatExperienceFactor(member.tipFactorHundredths)}</strong></td><td><span className="permission yes">Sí</span></td><td><span className={canBeEvaluated ? "permission yes" : "permission no"}>{canBeEvaluated ? "Sí" : "No"}</span></td></tr>; })}
+            </tbody></table></div>}
+            {auth.account?.role === "admin" && (
+              <div className="account-admin-grid">
+                <form className="panel account-form" onSubmit={(event) => void submitAccount(event, "/api/admin/users")}>
+                  <div><span className="section-kicker">ADMINISTRACIÓN</span><h3>Crear una cuenta real</h3><p>El trabajador podrá entrar con este usuario y contraseña.</p></div>
+                  <label>Nombre o alias<input name="displayName" required minLength={2} maxLength={100} autoComplete="off" /></label>
+                  <label>Usuario<input name="loginIdentifier" required minLength={3} maxLength={80} autoComplete="off" spellCheck={false} /></label>
+                  <label>Cargo<select name="jobTitle" defaultValue="waiter"><option value="waiter">Garzón</option><option value="bartender">Barman</option><option value="cashier">Cajera</option><option value="head_waiter">Jefe de garzones</option></select></label>
+                  <label>Porcentaje de experiencia<input name="tipPercentage" type="number" required min={1} max={100} step={1} inputMode="numeric" placeholder="Ej: 65" /><small>100% = 1,00 punto · 65% = 0,65 puntos</small></label>
+                  <label>Contraseña inicial<input name="password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" /></label>
+                  <button className="primary full" disabled={submitting}>{submitting ? "Guardando…" : "Crear cuenta"}</button>
+                  {accountMessage && <p className="form-message" role="status">{accountMessage}</p>}
+                </form>
+                <article className="panel stored-users"><div><span className="section-kicker">BASE DE DATOS</span><h3>Cuentas guardadas</h3></div>{auth.users.length === 0 ? <p>No hay cuentas visibles.</p> : <ul>{auth.users.map((user) => <li key={user.id}><span className="avatar tiny">{initials(user.displayName)}</span><div><strong>{user.displayName}</strong><small>@{user.loginIdentifier} · {jobTitles[user.jobTitle] ?? user.jobTitle}</small></div><span className="permission yes">Activa</span></li>)}</ul>}</article>
               </div>
-              <div className="section-heading">
-                <div><p className="eyebrow">TURNO PM · 26 JULIO</p><h2>Valora a tus compañeros</h2><span>Cada criterio se responde por separado.</span></div>
-                <div className="legend"><i /> Pendiente <i className="done" /> Completo</div>
-              </div>
-              <div className="colleague-list">
-                {colleagues.map((person, index) => {
-                  const isDone = criteria.every((criterion) => (ratings[person.id]?.[criterion.id] ?? 0) > 0);
-                  return (
-                    <article className={isDone ? "rating-card complete" : "rating-card"} key={person.id}>
-                      <div className="person-row">
-                        <div className={`avatar ${person.color}`}>{person.initials}</div>
-                        <div><strong>{person.name}</strong><span>{person.role} · {person.shift}</span></div>
-                        <span className={isDone ? "status complete" : "status pending"}>{isDone ? "✓ Completo" : `${index + 1} · Pendiente`}</span>
-                      </div>
-                      <div className="criteria-grid">
-                        {criteria.map((criterion) => (
-                          <div className="criterion" key={criterion.id}>
-                            <label>{criterion.label}<small>{criterion.hint}</small></label>
-                            <StarRating
-                              label={`${criterion.label} de ${person.name}`}
-                              value={ratings[person.id]?.[criterion.id] ?? 0}
-                              onChange={(value) => setRating(person.id, criterion.id, value)}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-            <aside className="submit-panel">
-              <span className="section-kicker">PROGRESO DE HOY</span>
-              <ProgressRing value={completion} />
-              <h3>{completed} de {colleagues.length} compañeros</h3>
-              <p>Completa los {criteria.length} criterios de cada persona.</p>
-              <div className="check-list">
-                {colleagues.map((person) => {
-                  const done = criteria.every((criterion) => (ratings[person.id]?.[criterion.id] ?? 0) > 0);
-                  return <span key={person.id} className={done ? "done" : ""}><i>{done ? "✓" : "○"}</i>{person.name}</span>;
-                })}
-              </div>
-              <button
-                className="primary full"
-                disabled={completed !== colleagues.length}
-                onClick={() => setSubmitted(true)}
-              >
-                Enviar valoración diaria
-              </button>
-              {submitted && <div className="success-message">✓ Valoración enviada. Gracias por reconocer a tu equipo.</div>}
-              <small className="lock-note">▣ Una vez enviada, solo un administrador puede reabrirla.</small>
-              <div className="auto-close-note"><strong>◷ Cierre automático · 23:59</strong><span>Lo que no completes se registrará como “Promedio automático” y contará como una omisión.</span></div>
-            </aside>
+            )}
           </section>
         )}
 
-        {role === "worker" && view === "resultados" && (
-          <>
-            <section className="results-hero">
-              <div><span className="pill olive">Julio 2026</span><h2>Tu crecimiento, criterio por criterio</h2><p>Estos promedios reúnen todas las valoraciones válidas que recibiste este mes.</p></div>
-              <div className="overall-score"><span>Promedio general</span><strong>4.75</strong><div>★★★★★</div><small>18 compañeros evaluaron</small></div>
-            </section>
-            <section className="criteria-results">
-              {[
-                ["Trabajo en equipo", "4.7", "94%", "+0.2"],
-                ["Actitud", "4.8", "96%", "+0.1"],
-                ["Apoyo en turno", "4.6", "92%", "+0.3"],
-                ["Calidad de servicio", "4.9", "98%", "+0.2"],
-              ].map(([label, score, percent, change]) => (
-                <article key={label}><span>{label}</span><strong>{score}</strong><div className="mini-progress"><i style={{ width: percent }} /></div><small>↑ {change} este mes</small></article>
-              ))}
-            </section>
-            <section className="two-column">
-              <article className="panel"><div className="panel-head"><h3>Evolución mensual</h3><span className="status complete">Tendencia positiva</span></div><div className="chart"><div className="chart-line">●<span>●</span><b>●</b><em>●</em><i>●</i></div><div className="chart-labels"><span>Mar</span><span>Abr</span><span>May</span><span>Jun</span><span>Jul</span></div></div></article>
-              <article className="panel feedback"><span className="quote">“</span><h3>Lo que más reconoce el equipo</h3><p>“Siempre está atenta a las mesas de los demás cuando el salón se llena.”</p><small>Comentario anónimo verificado · Julio</small></article>
-            </section>
-          </>
-        )}
-
-        {role === "worker" && view === "recompensas" && (
-          <>
-            <section className="results-hero rewards">
-              <div><span className="pill coral">Recompensas transparentes</span><h2>Tu esfuerzo se convierte en beneficios reales.</h2><p>El promedio se calcula al finalizar el mes y solo considera evaluaciones completas y válidas.</p></div>
-              <div className="points"><span>Nivel actual</span><strong>Oro</strong><small>4.75 promedio</small></div>
-            </section>
-            <section className="reward-grid">
-              {[
-                ["+3% en propinas", "Promedio mensual de 4.70 o más", "Logrado", "100%"],
-                ["$25.000 de bono", "Promedio de 4.80 + 95% de cumplimiento", "En progreso", "82%"],
-                ["60 min de descanso", "24 días de evaluaciones completas", "40 min ganados", "67%"],
-                ["Empleado del mes", "Mayor puntaje elegible + validación del jefe", "Top 3 actual", "76%"],
-              ].map(([title, detail, status, progress]) => (
-                <article key={title}><div className="reward-top"><span>★</span><b>{status}</b></div><h3>{title}</h3><p>{detail}</p><div className="mini-progress"><i style={{ width: progress }} /></div><small>{progress} del objetivo</small></article>
-              ))}
-            </section>
-          </>
-        )}
-
-        {role === "admin" && view === "inicio" && (
-          <>
-            <section className="admin-overview">
-              <div><span className="pill coral">Cierre mensual · faltan 5 días</span><h2>El equipo mantiene un alto nivel de colaboración.</h2><p>Revisa cumplimiento, tendencias y posibles anomalías antes de confirmar los bonos de julio.</p></div>
-              <div className="month-picker">‹ <strong>Julio 2026</strong> ›</div>
-            </section>
-            <section className="metric-grid admin">
-              <article><div className="metric-icon coral">★</div><div><span>Promedio del equipo</span><strong>4.72</strong><small>↑ 0.14 vs. junio</small></div></article>
-              <article><div className="metric-icon olive">✓</div><div><span>Cumplimiento diario</span><strong>94%</strong><small>226 manuales · 14 automáticas</small></div></article>
-              <article><div className="metric-icon gold">$</div><div><span>Bonos proyectados</span><strong>$175.000</strong><small>7 trabajadores elegibles</small></div></article>
-              <article><div className="metric-icon blue">!</div><div><span>Alertas por revisar</span><strong>3</strong><small>Patrones atípicos detectados</small></div></article>
-            </section>
-            <section className="admin-grid">
-              <article className="panel compliance">
-                <div className="panel-head"><div><span className="section-kicker">HOY · TURNO PM</span><h3>Cumplimiento de valoraciones</h3></div><button className="text-button">Ver detalle →</button></div>
-                <div className="compliance-body"><ProgressRing value={83} /><div><strong>20 de 24 trabajadores completaron</strong><p>4 pendientes · Cierre automático a las 23:59</p><div className="pending-people">{["ML", "CR", "AT", "DS"].map((name) => <span key={name}>{name}</span>)}</div></div></div>
-              </article>
-              <article className="panel alerts">
-                <div className="panel-head"><div><span className="section-kicker">CONTROL DE EQUIDAD</span><h3>Alertas automáticas</h3></div><span className="status pending">3 nuevas</span></div>
-                <div className="alert-row"><span>↔</span><div><strong>Patrón de valoración recíproca</strong><p>2 trabajadores se califican siempre con 5 estrellas.</p></div></div>
-                <div className="alert-row"><span>↓</span><div><strong>Cambio brusco de puntuación</strong><p>Una valoración difiere 2.1 puntos del promedio.</p></div></div>
-              </article>
-            </section>
-            <section className="autofill-panel">
-              <div className="autofill-icon">◷</div>
-              <div><span className="section-kicker">REGLA OBLIGATORIA ACTIVA</span><h3>Cierre automático de omisiones</h3><p>A las 23:59, cada criterio pendiente recibe el promedio válido que ese compañero obtuvo durante el mismo turno. El registro queda identificado como automático y la omisión se acumula en el historial del evaluador.</p></div>
-              <div className="autofill-stats"><span><strong>14</strong> respuestas automáticas hoy</span><span><strong>4</strong> trabajadores con omisión</span></div>
-            </section>
-            <section className="panel leaderboard">
-              <div className="panel-head"><div><span className="section-kicker">PROMEDIO MENSUAL</span><h3>Resumen general de trabajadores</h3></div><button className="text-button" onClick={() => setView("resultados")}>Abrir informe completo →</button></div>
-              <div className="leader-row header"><span>Trabajador</span><span>Sección</span><span>Promedio</span><span>Cumplimiento</span><span>Proyección</span></div>
-              {monthly.slice(0, 4).map((person) => (
-                <div className="leader-row" key={person.name}><span><i className="avatar tiny">{person.initials}</i><strong>{person.name}</strong></span><span>{person.section}</span><span className="score">★ {person.total}</span><span>96%</span><span className="status complete">{person.status}</span></div>
-              ))}
-            </section>
-          </>
-        )}
-
-        {role === "admin" && view === "resultados" && (
-          <section className="admin-report">
-            <div className="section-heading">
-              <div><p className="eyebrow">INFORME MENSUAL · JULIO 2026</p><h2>Promedios por trabajador y criterio</h2><span>Vista administrativa completa. Las identidades de los evaluadores permanecen protegidas.</span></div>
-              <div className="filters">{["Todas", "Salón", "Barra", "Cocina"].map((section) => <button className={selectedSection === section ? "active" : ""} onClick={() => setSelectedSection(section)} key={section}>{section}</button>)}</div>
-            </div>
-            <div className="report-table">
-              <div className="report-row head"><span>Trabajador</span><span>Sección</span><span>Equipo</span><span>Actitud</span><span>Apoyo</span><span>Servicio</span><span>General</span><span>Estado</span></div>
-              {filteredMonthly.map((person, index) => (
-                <div className="report-row" key={person.name}>
-                  <span><i>{index + 1}</i><b className="avatar tiny">{person.initials}</b><strong>{person.name}</strong></span>
-                  <span>{person.section}</span><span>{person.team}</span><span>{person.attitude}</span><span>{person.support}</span><span>{person.service}</span><span className="score">★ {person.total}</span><span className={person.status === "Premiable" ? "status complete" : "status neutral"}>{person.status}</span>
-                </div>
-              ))}
-            </div>
-            <div className="admin-grid">
-              <article className="panel"><div className="panel-head"><h3>Promedio por sección</h3></div>{[["Salón", "4.70", "94%"], ["Barra", "4.75", "95%"], ["Cocina", "4.73", "95%"]].map(([label, value, width]) => <div className="section-average" key={label}><span>{label}</span><div className="mini-progress"><i style={{width}} /></div><strong>{value}</strong></div>)}</article>
-              <article className="panel fairness"><div className="panel-head"><h3>Reglas aplicadas al promedio</h3></div><ul><li>✓ Mínimo 10 evaluaciones válidas</li><li>✓ Sin autoevaluaciones</li><li>✓ Atípicos extremos quedan en revisión</li><li>✓ Evaluadores siempre anónimos</li><li>◷ Notas automáticas identificadas</li><li>! Omisiones registradas por trabajador</li></ul></article>
-            </div>
+        {view === "evaluaciones" && (
+          <section className="data-section">
+            <div className="section-heading"><div><p className="eyebrow">REGISTROS REALES</p><h2>Evaluaciones</h2><span>Esta sección permanecerá vacía hasta que exista un turno válido y una cuenta autenticada.</span></div></div>
+            <div className="empty-state" role="status"><span className="empty-icon">☆</span><h3>Aún no hay evaluaciones registradas</h3><p>No se muestran estrellas, promedios ni tendencias porque todavía no existen observaciones reales guardadas.</p><div className="empty-requirements"><span>Cuenta autenticada</span><span>Turno compartido</span><span>Período abierto</span></div></div>
           </section>
         )}
 
-        {role === "admin" && view === "recompensas" && (
-          <>
-            <section className="section-heading">
-              <div><p className="eyebrow">CONFIGURACIÓN DEL MES</p><h2>Reglas de recompensas</h2><span>Todos conocen de antemano cómo se obtiene cada beneficio.</span></div>
-              <button className="primary">+ Nueva regla</button>
-            </section>
-            <section className="rules-list">
-              {[
-                ["Cierre automático por omisión", "Pendientes a las 23:59 reciben el promedio del mismo turno", "Promedio automático", "14 aplicadas hoy", "Activa"],
-                ["Aumento porcentual de propinas", "Promedio ≥ 4.70", "+3%", "7 elegibles", "Activa"],
-                ["Bono en efectivo o tarjeta", "Promedio ≥ 4.80 + cumplimiento ≥ 95%", "$25.000", "3 elegibles", "Activa"],
-                ["Descanso adicional pagado", "24 días de evaluaciones completas", "60 minutos", "5 elegibles", "Activa"],
-                ["Empleado del mes", "Mejor promedio elegible + validación del jefe", "Reconocimiento + bono", "3 finalistas", "Pendiente"],
-              ].map(([title, condition, benefit, eligible, status]) => (
-                <article key={title}><span className="rule-icon">★</span><div className="rule-copy"><h3>{title}</h3><p>{condition}</p></div><div><small>BENEFICIO</small><strong>{benefit}</strong></div><div><small>PROYECCIÓN</small><strong>{eligible}</strong></div><span className={status === "Activa" ? "status complete" : "status pending"}>{status}</span><button className="icon-button">•••</button></article>
-              ))}
-            </section>
-            <div className="policy-note"><span>i</span><div><strong>Cómo funciona el castigo por omisión</strong><p>La nota automática mantiene completo el día, pero no se presenta como opinión del trabajador. Cada omisión queda en su historial y puede reducir su elegibilidad para bonos por cumplimiento.</p></div></div>
-          </>
+        {view === "acuerdo" && (
+          <section className="data-section">
+            <div className="section-heading"><div><p className="eyebrow">TRABAJADORES REGISTRADOS</p><h2>Factores de propina</h2><span>Cada factor proviene del porcentaje guardado al crear la cuenta: 100% equivale a 1,00 punto.</span></div><span className="status complete">Total {formatExperienceFactor(totalFactorHundredths)}</span></div>
+            <div className="tip-simulator">
+              <div className="tip-simulator-head"><div><span className="section-kicker">CALCULADORA</span><h3>Distribución por factores</h3><p>Ingresa el fondo real del turno. El valor comienza en cero y no se guarda todavía.</p></div><label><span>Fondo común</span><div className="money-input"><b>$</b><input type="number" min="0" step="1" value={tipPoolPesos} onChange={(event) => setTipPoolPesos(Math.max(0, Math.trunc(Number(event.target.value) || 0)))} aria-label="Fondo común de propinas en pesos chilenos" /></div></label></div>
+              {realTeam.length === 0 ? <div className="calculator-empty">Agrega trabajadores antes de calcular una distribución.</div> : tipPoolPesos === 0 ? <div className="calculator-empty">Ingresa el monto real de propinas para calcular la distribución.</div> : <div className="tip-simulation-grid">{realTeam.map((member) => { const result = tipSimulation.find(({ participantId }) => participantId === member.id); return <article key={member.id}><span>{member.displayName}</span><strong>{clpFormatter.format(result?.amountPesos ?? 0)}</strong><small>Factor {formatExperienceFactor(member.tipFactorHundredths)}</small></article>; })}</div>}
+              {realTeam.length > 0 && <div className="formula-note"><strong>Fórmula:</strong> monto ÷ {formatExperienceFactor(totalFactorHundredths)} × factor individual. La calculadora distribuye cada peso mediante redondeo determinista.</div>}
+            </div>
+          </section>
         )}
       </section>
     </main>

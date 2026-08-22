@@ -14,10 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Estrellas del Equipo",
-  description: "Reconocimiento diario entre compañeros y recompensas transparentes.",
-  other: {
-    "codex-preview": "development",
-  },
+  description: "Evaluaciones de equipo y distribución transparente de propinas con datos reales.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
