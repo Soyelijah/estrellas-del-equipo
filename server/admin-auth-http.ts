@@ -1,4 +1,4 @@
-import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword } from "./admin-auth-service.ts";
+import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from "./admin-auth-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
 const COOKIE_NAME = "estrellas_session";
@@ -14,6 +14,9 @@ type AuthDependencies = {
     saveSession(record: Record<string, string>): Promise<void>;
     createManagedUser(record: Record<string, unknown>): Promise<{ created: boolean }>;
     recoverAdministratorPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
+    updateManagedUser(record: Record<string, unknown>): Promise<{ updated: boolean; conflict: boolean }>;
+    setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
+    resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     findSessionActor(tokenHash: string, now: string): Promise<{ userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string } | null>;
     revokeSession(tokenHash: string, now: string): Promise<void>;
     listOrganizationUsers(organizationId: string): Promise<unknown[]>;
@@ -99,7 +102,7 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       });
     }
 
-    if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405, { allow: "GET, POST" });
+    if (request.method !== "POST" && request.method !== "PATCH") return json({ ok: false, error: "method_not_allowed" }, 405, { allow: "GET, POST, PATCH" });
     if (!isSameOriginMutation(request)) return json({ ok: false, error: "cross_origin_request" }, 403);
     const parsed = await readBody(request);
     if (!parsed.ok) return parsed.response;
@@ -156,6 +159,21 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       return result.ok
         ? json({ ok: true, userId: result.userId, displayName: result.displayName }, result.status)
         : json({ ok: false, error: result.error }, result.status);
+    }
+    const userRoute = path.match(/^\/api\/admin\/users\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/(status|password))?$/iu);
+    if (userRoute) {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const [, userId, action] = userRoute;
+      const result = action === "status" && request.method === "POST"
+        ? await setManagedUserStatus({ ...parsed.body, userId } as never, actor, serviceDependencies)
+        : action === "password" && request.method === "POST"
+          ? await resetManagedUserPassword({ ...parsed.body, userId } as never, actor, serviceDependencies)
+          : !action && request.method === "PATCH"
+            ? await updateManagedUser({ ...parsed.body, userId } as never, actor, serviceDependencies)
+            : null;
+      if (!result) return json({ ok: false, error: "method_not_allowed" }, 405);
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
     }
     return json({ ok: false, error: "not_found" }, 404);
   } catch {

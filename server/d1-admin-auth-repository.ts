@@ -33,6 +33,16 @@ export class D1AdminAuthRepository {
     this.database = database;
   }
 
+  private async managedTarget(userId: string, organizationId: string) {
+    return this.database.prepare(`
+      SELECT u.id AS userId, m.id AS membershipId
+      FROM users u JOIN memberships m ON m.user_id = u.id
+      WHERE u.id = ? AND m.organization_id = ? AND m.role <> 'admin'
+        AND u.deleted_at IS NULL AND m.deleted_at IS NULL
+      LIMIT 1
+    `).bind(userId, organizationId).first<{ userId: string; membershipId: string }>();
+  }
+
   async getBootstrapState() {
     const row = await this.database.prepare(`
       SELECT
@@ -134,6 +144,55 @@ export class D1AdminAuthRepository {
         INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
         VALUES (?, ?, NULL, 'admin.password_recovered', 'user', ?, '{}', ?)
       `).bind(rawRecord.auditId, account.organizationId, account.userId, rawRecord.now),
+    ]);
+    return { updated: true as const };
+  }
+
+  async updateManagedUser(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, string | number>;
+    if (!await this.managedTarget(String(record.userId), String(record.organizationId))) return { updated: false as const, conflict: false as const };
+    try {
+      await this.database.batch([
+        this.database.prepare("UPDATE users SET display_name = ?, login_identifier = ?, updated_at = ? WHERE id = ?")
+          .bind(record.displayName, record.loginIdentifier, record.now, record.userId),
+        this.database.prepare("UPDATE memberships SET job_title = ?, tip_factor_hundredths = ?, updated_at = ? WHERE user_id = ? AND organization_id = ? AND role <> 'admin'")
+          .bind(record.jobTitle, record.tipFactorHundredths, record.now, record.userId, record.organizationId),
+        this.database.prepare(`
+          INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
+          VALUES (?, ?, ?, 'user.updated', 'user', ?, ?, ?)
+        `).bind(record.auditId, record.organizationId, record.actorMembershipId, record.userId, JSON.stringify({ displayName: record.displayName, loginIdentifier: record.loginIdentifier, jobTitle: record.jobTitle, tipFactorHundredths: record.tipFactorHundredths }), record.now),
+      ]);
+      return { updated: true as const, conflict: false as const };
+    } catch (error) {
+      if (uniqueConflict(error)) return { updated: false as const, conflict: true as const };
+      throw error;
+    }
+  }
+
+  async setManagedUserStatus(rawRecord: Record<string, string>) {
+    if (!await this.managedTarget(rawRecord.userId, rawRecord.organizationId)) return { updated: false as const };
+    const storedStatus = rawRecord.status === "suspended" ? "disabled" : "active";
+    const statements = [
+      this.database.prepare("UPDATE users SET status = ?, updated_at = ? WHERE id = ?").bind(storedStatus, rawRecord.now, rawRecord.userId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
+        VALUES (?, ?, ?, ?, 'user', ?, '{}', ?)
+      `).bind(rawRecord.auditId, rawRecord.organizationId, rawRecord.actorMembershipId, rawRecord.status === "active" ? "user.reactivated" : "user.suspended", rawRecord.userId, rawRecord.now),
+    ];
+    if (rawRecord.status === "suspended") statements.splice(1, 0, this.database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(rawRecord.now, rawRecord.userId));
+    await this.database.batch(statements);
+    return { updated: true as const };
+  }
+
+  async resetManagedUserPassword(rawRecord: Record<string, string>) {
+    if (!await this.managedTarget(rawRecord.userId, rawRecord.organizationId)) return { updated: false as const };
+    await this.database.batch([
+      this.database.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").bind(rawRecord.passwordHash, rawRecord.now, rawRecord.userId),
+      this.database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(rawRecord.now, rawRecord.userId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
+        VALUES (?, ?, ?, 'user.password_reset', 'user', ?, '{}', ?)
+      `).bind(rawRecord.auditId, rawRecord.organizationId, rawRecord.actorMembershipId, rawRecord.userId, rawRecord.now),
     ]);
     return { updated: true as const };
   }

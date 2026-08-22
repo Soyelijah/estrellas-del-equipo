@@ -20,6 +20,9 @@ type Dependencies = {
     saveSession(record: Record<string, string>): Promise<void>;
     createManagedUser(record: Record<string, unknown>): Promise<{ created: boolean }>;
     recoverAdministratorPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
+    updateManagedUser(record: Record<string, unknown>): Promise<{ updated: boolean; conflict: boolean }>;
+    setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
+    resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
   };
   createId(): string;
   createToken(): string;
@@ -31,6 +34,7 @@ type Dependencies = {
 
 const LOGIN_PATTERN = /^[\p{L}\p{N}._@+-]{3,80}$/u;
 const JOB_TITLES = new Set<JobTitle>(["head_waiter", "waiter", "bartender", "cashier"]);
+const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 function normalized(value: unknown): string {
   return typeof value === "string" ? value.normalize("NFKC").trim() : "";
@@ -130,7 +134,7 @@ export async function recoverAdministratorPassword(input: { loginIdentifier: str
 export async function createManagedUser(input: ManagedUserInput, actor: SessionActor, dependencies: Dependencies) {
   if (actor.role !== "admin") return { ok: false as const, status: 403, error: "admin_required" };
   const tipFactorHundredths = typeof input.tipPercentage === "number" ? input.tipPercentage : Number(input.tipPercentage);
-  if (!validAccount(input) || !JOB_TITLES.has(input.jobTitle) || !Number.isInteger(tipFactorHundredths) || tipFactorHundredths < 1 || tipFactorHundredths > 100) {
+  if (!validAccount(input) || !JOB_TITLES.has(input.jobTitle) || !Number.isInteger(tipFactorHundredths) || tipFactorHundredths < 1 || tipFactorHundredths > 100 || (input.jobTitle === "cashier" && tipFactorHundredths !== 50)) {
     return { ok: false as const, status: 422, error: "invalid_account_data" };
   }
   const userId = dependencies.createId();
@@ -159,4 +163,43 @@ export async function createManagedUser(input: ManagedUserInput, actor: SessionA
   });
   if (!created.created) return { ok: false as const, status: 409, error: "login_identifier_exists" };
   return { ok: true as const, status: 201, userId, displayName: normalized(input.displayName) };
+}
+
+export async function updateManagedUser(input: Omit<ManagedUserInput, "password"> & { userId: string }, actor: SessionActor, dependencies: Dependencies) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403, error: "admin_required" };
+  const tipFactorHundredths = typeof input.tipPercentage === "number" ? input.tipPercentage : Number(input.tipPercentage);
+  const displayName = normalized(input.displayName);
+  const loginIdentifier = normalizeLogin(input.loginIdentifier);
+  if (!USER_ID_PATTERN.test(input.userId) || displayName.length < 2 || displayName.length > 100 || !LOGIN_PATTERN.test(loginIdentifier) || !JOB_TITLES.has(input.jobTitle) || !Number.isInteger(tipFactorHundredths) || tipFactorHundredths < 1 || tipFactorHundredths > 100 || (input.jobTitle === "cashier" && tipFactorHundredths !== 50)) {
+    return { ok: false as const, status: 422, error: "invalid_account_data" };
+  }
+  const result = await dependencies.repository.updateManagedUser({
+    ...input,
+    displayName,
+    loginIdentifier,
+    tipFactorHundredths,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    auditId: dependencies.createId(),
+    now: dependencies.now,
+  });
+  if (result.conflict) return { ok: false as const, status: 409, error: "login_identifier_exists" };
+  if (!result.updated) return { ok: false as const, status: 404, error: "managed_user_not_found" };
+  return { ok: true as const, status: 200 };
+}
+
+export async function setManagedUserStatus(input: { userId: string; status: string }, actor: SessionActor, dependencies: Dependencies) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403, error: "admin_required" };
+  if (!USER_ID_PATTERN.test(input.userId) || !new Set(["active", "suspended"]).has(input.status)) return { ok: false as const, status: 422, error: "invalid_account_data" };
+  const result = await dependencies.repository.setManagedUserStatus({ userId: input.userId, status: input.status, organizationId: actor.organizationId, actorMembershipId: actor.membershipId, auditId: dependencies.createId(), now: dependencies.now });
+  if (!result.updated) return { ok: false as const, status: 404, error: "managed_user_not_found" };
+  return { ok: true as const, status: 200 };
+}
+
+export async function resetManagedUserPassword(input: { userId: string; newPassword: string }, actor: SessionActor, dependencies: Dependencies) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403, error: "admin_required" };
+  if (!USER_ID_PATTERN.test(input.userId) || typeof input.newPassword !== "string" || input.newPassword.length < 12 || input.newPassword.length > 128) return { ok: false as const, status: 422, error: "invalid_account_data" };
+  const result = await dependencies.repository.resetManagedUserPassword({ userId: input.userId, organizationId: actor.organizationId, actorMembershipId: actor.membershipId, passwordHash: await dependencies.hashPassword(input.newPassword), auditId: dependencies.createId(), now: dependencies.now });
+  if (!result.updated) return { ok: false as const, status: 404, error: "managed_user_not_found" };
+  return { ok: true as const, status: 200 };
 }

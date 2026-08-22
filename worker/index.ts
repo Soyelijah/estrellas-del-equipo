@@ -65,7 +65,7 @@ const worker = {
       });
     }
 
-    if (url.pathname.startsWith("/api/auth/") || url.pathname === "/api/admin/users") {
+    if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin/")) {
       if (!env.DB) {
         return Response.json(
           { ok: false, error: "service_unavailable" },

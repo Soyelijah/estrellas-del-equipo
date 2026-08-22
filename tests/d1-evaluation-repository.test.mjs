@@ -158,6 +158,32 @@ test("recovers the administrator password atomically, revokes sessions, and reco
   assert.deepEqual(await repository.recoverAdministratorPassword({ loginIdentifier: "otro", passwordHash: "x", auditId: "audit-x", now: "2026-08-22T13:00:00.000Z" }), { updated: false });
 });
 
+test("updates, suspends, reactivates, and resets only a worker in the administrators organization", async () => {
+  const { database, repository } = createEmptyAdminFixture();
+  await repository.saveBootstrap({
+    organization: { id: "org-1", name: "Restaurante", createdAt: "2026-08-22T12:00:00.000Z" },
+    user: { id: "admin-1", authSubject: "local:admin-1", displayName: "Jefe", loginIdentifier: "jefe", passwordHash: "admin-hash", status: "active", createdAt: "2026-08-22T12:00:00.000Z" },
+    membership: { id: "membership-admin", organizationId: "org-1", userId: "admin-1", role: "admin", joinedAt: "2026-08-22T12:00:00.000Z" },
+    guard: { key: "administrator_bootstrap", createdAt: "2026-08-22T12:00:00.000Z" },
+  });
+  await repository.createManagedUser({
+    user: { id: "11111111-1111-4111-8111-111111111111", authSubject: "local:worker-1", displayName: "Garzón", loginIdentifier: "garzon", passwordHash: "old-worker-hash", jobTitle: "waiter", status: "active", createdAt: "2026-08-22T13:00:00.000Z" },
+    membership: { id: "membership-worker", organizationId: "org-1", userId: "11111111-1111-4111-8111-111111111111", role: "worker", joinedAt: "2026-08-22T13:00:00.000Z", createdByMembershipId: "membership-admin", tipFactorHundredths: 65 },
+  });
+  await repository.saveSession({ id: "worker-session", userId: "11111111-1111-4111-8111-111111111111", tokenHash: "worker-session-hash", expiresAt: "2026-08-23T00:00:00.000Z", createdAt: "2026-08-22T13:00:00.000Z" });
+
+  assert.deepEqual(await repository.updateManagedUser({ userId: "11111111-1111-4111-8111-111111111111", organizationId: "org-1", actorMembershipId: "membership-admin", displayName: "Garzón Uno", loginIdentifier: "garzon.uno", jobTitle: "waiter", tipFactorHundredths: 75, auditId: "audit-update", now: "2026-08-22T14:00:00.000Z" }), { updated: true, conflict: false });
+  assert.deepEqual(await repository.setManagedUserStatus({ userId: "11111111-1111-4111-8111-111111111111", organizationId: "org-1", actorMembershipId: "membership-admin", status: "suspended", auditId: "audit-suspend", now: "2026-08-22T14:01:00.000Z" }), { updated: true });
+  assert.deepEqual(await repository.setManagedUserStatus({ userId: "11111111-1111-4111-8111-111111111111", organizationId: "org-1", actorMembershipId: "membership-admin", status: "active", auditId: "audit-reactivate", now: "2026-08-22T14:02:00.000Z" }), { updated: true });
+  assert.deepEqual(await repository.resetManagedUserPassword({ userId: "11111111-1111-4111-8111-111111111111", organizationId: "org-1", actorMembershipId: "membership-admin", passwordHash: "new-worker-hash", auditId: "audit-password", now: "2026-08-22T14:03:00.000Z" }), { updated: true });
+
+  const worker = database.prepare("SELECT display_name, login_identifier, password_hash, status FROM users WHERE id = '11111111-1111-4111-8111-111111111111'").get();
+  assert.deepEqual({ ...worker }, { display_name: "Garzón Uno", login_identifier: "garzon.uno", password_hash: "new-worker-hash", status: "active" });
+  assert.equal(database.prepare("SELECT revoked_at FROM auth_sessions WHERE id = 'worker-session'").get().revoked_at, "2026-08-22T14:01:00.000Z");
+  assert.deepEqual(database.prepare("SELECT action FROM audit_events WHERE id LIKE 'audit-%' ORDER BY created_at").all().map((row) => row.action), ["user.updated", "user.suspended", "user.reactivated", "user.password_reset"]);
+  assert.deepEqual(await repository.setManagedUserStatus({ userId: "11111111-1111-4111-8111-111111111111", organizationId: "other-org", actorMembershipId: "membership-admin", status: "suspended", auditId: "audit-other", now: "2026-08-22T15:00:00.000Z" }), { updated: false });
+});
+
 test("loads the active membership bound to the authenticated subject", async () => {
   const { repository } = createFixture();
 

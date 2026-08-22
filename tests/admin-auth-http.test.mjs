@@ -3,9 +3,9 @@ import test from "node:test";
 
 import { handleAdminAuthRequest } from "../server/admin-auth-http.ts";
 
-function mutation(path, body, headers = {}) {
+function mutation(path, body, headers = {}, method = "POST") {
   return new Request(`https://equipo.example${path}`, {
-    method: "POST",
+    method,
     headers: { origin: "https://equipo.example", "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
@@ -21,6 +21,9 @@ function dependencies(overrides = {}) {
       async saveSession() {},
       async createManagedUser() { return { created: true }; },
       async recoverAdministratorPassword() { return { updated: true }; },
+      async updateManagedUser() { return { updated: true, conflict: false }; },
+      async setManagedUserStatus() { return { updated: true }; },
+      async resetManagedUserPassword() { return { updated: true }; },
       async findSessionActor() { return null; },
       async revokeSession() {},
       async listOrganizationUsers() { return []; },
@@ -140,4 +143,21 @@ test("cross-origin mutations are rejected before account changes", async () => {
   );
   assert.equal(response.status, 403);
   assert.deepEqual(await response.json(), { ok: false, error: "cross_origin_request" });
+});
+
+test("routes worker edit, lifecycle, and password reset only through an administrator session", async () => {
+  const userId = "11111111-1111-4111-8111-111111111111";
+  const admin = { async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m1" }; } };
+  const headers = { cookie: "estrellas_session=private-cookie-token" };
+  const edit = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}`, { displayName: "Garzón", loginIdentifier: "garzon", jobTitle: "waiter", tipPercentage: 65 }, headers, "PATCH"), dependencies({ repository: admin }));
+  const status = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/status`, { status: "suspended" }, headers), dependencies({ repository: admin }));
+  const password = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/password`, { newPassword: "Credencial privada nueva 2026" }, headers), dependencies({ repository: admin }));
+  const unauthorized = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/status`, { status: "suspended" }), dependencies());
+  assert.deepEqual([edit.status, status.status, password.status, unauthorized.status], [200, 200, 200, 401]);
+});
+
+test("rejects malformed worker resource identifiers before repository mutation", async () => {
+  const response = await handleAdminAuthRequest(mutation("/api/admin/users/not-an-id/status", { status: "suspended" }, { cookie: "estrellas_session=private-cookie-token" }), dependencies({ repository: { async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m1" }; } } }));
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { ok: false, error: "not_found" });
 });

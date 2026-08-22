@@ -6,6 +6,9 @@ import {
   createManagedUser,
   loginWithPassword,
   recoverAdministratorPassword,
+  resetManagedUserPassword,
+  setManagedUserStatus,
+  updateManagedUser,
 } from "../server/admin-auth-service.ts";
 
 const bootstrapInput = {
@@ -16,7 +19,7 @@ const bootstrapInput = {
 };
 
 function dependencies(overrides = {}) {
-  const saved = { bootstrap: [], sessions: [], users: [], recoveries: [] };
+  const saved = { bootstrap: [], sessions: [], users: [], recoveries: [], updates: [], statuses: [], passwordResets: [] };
   let id = 0;
   return {
     saved,
@@ -27,6 +30,9 @@ function dependencies(overrides = {}) {
       async saveSession(record) { saved.sessions.push(record); },
       async createManagedUser(record) { saved.users.push(record); return { created: true }; },
       async recoverAdministratorPassword(record) { saved.recoveries.push(record); return { updated: true }; },
+      async updateManagedUser(record) { saved.updates.push(record); return { updated: true, conflict: false }; },
+      async setManagedUserStatus(record) { saved.statuses.push(record); return { updated: true }; },
+      async resetManagedUserPassword(record) { saved.passwordResets.push(record); return { updated: true }; },
       ...overrides.repository,
     },
     createId: () => `id-${++id}`,
@@ -135,4 +141,43 @@ test("rejects a worker percentage outside one to one hundred", async () => {
   assert.deepEqual(await createManagedUser({ ...input, tipPercentage: "0" }, actor, deps), { ok: false, status: 422, error: "invalid_account_data" });
   assert.deepEqual(await createManagedUser({ ...input, tipPercentage: "101" }, actor, deps), { ok: false, status: 422, error: "invalid_account_data" });
   assert.deepEqual(await createManagedUser({ ...input, tipPercentage: "65.5" }, actor, deps), { ok: false, status: 422, error: "invalid_account_data" });
+});
+
+test("requires the cashier fixed factor to remain fifty", async () => {
+  const deps = dependencies();
+  const actor = { role: "admin", organizationId: "org-1", membershipId: "m-admin" };
+  const input = { displayName: "Cajera", loginIdentifier: "cajera", password: "Otra contraseña privada 2026", jobTitle: "cashier" };
+  assert.deepEqual(await createManagedUser({ ...input, tipPercentage: "75" }, actor, deps), { ok: false, status: 422, error: "invalid_account_data" });
+  assert.equal((await createManagedUser({ ...input, tipPercentage: "50" }, actor, deps)).ok, true);
+});
+
+test("updates a managed worker only as administrator and normalizes real account data", async () => {
+  const deps = dependencies();
+  const input = { userId: "11111111-1111-4111-8111-111111111111", displayName: " Garzón Uno ", loginIdentifier: " GARZON.UNO ", jobTitle: "waiter", tipPercentage: "65" };
+  const forbidden = await updateManagedUser(input, { role: "worker", organizationId: "org-1", membershipId: "m-worker" }, deps);
+  const accepted = await updateManagedUser(input, { role: "admin", organizationId: "org-1", membershipId: "m-admin" }, deps);
+  assert.deepEqual(forbidden, { ok: false, status: 403, error: "admin_required" });
+  assert.deepEqual(accepted, { ok: true, status: 200 });
+  assert.deepEqual(deps.saved.updates[0], { ...input, displayName: "Garzón Uno", loginIdentifier: "garzon.uno", tipFactorHundredths: 65, organizationId: "org-1", actorMembershipId: "m-admin", auditId: "id-1", now: deps.now });
+});
+
+test("maps worker update conflicts and missing cross-organization records safely", async () => {
+  const actor = { role: "admin", organizationId: "org-1", membershipId: "m-admin" };
+  const input = { userId: "11111111-1111-4111-8111-111111111111", displayName: "Garzón", loginIdentifier: "garzon", jobTitle: "waiter", tipPercentage: 50 };
+  const conflict = dependencies({ repository: { async updateManagedUser() { return { updated: false, conflict: true }; } } });
+  const missing = dependencies({ repository: { async updateManagedUser() { return { updated: false, conflict: false }; } } });
+  assert.deepEqual(await updateManagedUser(input, actor, conflict), { ok: false, status: 409, error: "login_identifier_exists" });
+  assert.deepEqual(await updateManagedUser(input, actor, missing), { ok: false, status: 404, error: "managed_user_not_found" });
+});
+
+test("suspends and reactivates workers and resets credentials without retaining the password", async () => {
+  const deps = dependencies();
+  const actor = { role: "admin", organizationId: "org-1", membershipId: "m-admin" };
+  const userId = "11111111-1111-4111-8111-111111111111";
+  assert.deepEqual(await setManagedUserStatus({ userId, status: "suspended" }, actor, deps), { ok: true, status: 200 });
+  assert.deepEqual(await setManagedUserStatus({ userId, status: "active" }, actor, deps), { ok: true, status: 200 });
+  assert.deepEqual(await resetManagedUserPassword({ userId, newPassword: "Credencial privada nueva 2026" }, actor, deps), { ok: true, status: 200 });
+  assert.deepEqual(deps.saved.statuses.map((entry) => entry.status), ["suspended", "active"]);
+  assert.equal(deps.saved.passwordResets[0].passwordHash, "stored-password-hash");
+  assert.equal(JSON.stringify(deps.saved.passwordResets[0]).includes("Credencial privada nueva 2026"), false);
 });
