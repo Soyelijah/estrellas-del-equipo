@@ -4,7 +4,7 @@ import test from "node:test";
 import { navigationForRole, onboardingForTeam } from "../app/view-model.ts";
 
 test("separates administrator navigation from the worker evaluation area", () => {
-  assert.deepEqual(navigationForRole("admin").map((item) => item.id), ["inicio", "equipo", "credenciales", "auditoria"]);
+  assert.deepEqual(navigationForRole("admin").map((item) => item.id), ["inicio", "equipo", "operacion", "acuerdo", "credenciales", "auditoria"]);
   assert.deepEqual(navigationForRole("worker").map((item) => item.id), ["inicio", "evaluaciones", "acuerdo"]);
 });
 

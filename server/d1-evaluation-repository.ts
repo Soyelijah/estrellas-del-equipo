@@ -53,6 +53,17 @@ type EvidenceRow = {
 };
 
 type CriterionRow = { id: string };
+type WorkspacePeriodRow = { id: string; name: string; ends_at: string; policy_version_id: string };
+type WorkspaceCriterionRow = { id: string; name: string; description: string; category: string };
+type WorkspaceAssignmentRow = {
+  shift_id: string;
+  starts_at: string;
+  ends_at: string;
+  section: string;
+  subject_membership_id: string;
+  subject_display_name: string;
+  subject_job_title: string;
+};
 
 export class D1EvaluationRepository implements EvaluationRepository {
   private readonly database: D1DatabaseLike;
@@ -112,6 +123,80 @@ export class D1EvaluationRepository implements EvaluationRepository {
         status: row.organization_status,
         deletedAt: row.organization_deleted_at,
       },
+    };
+  }
+
+  async loadWorkspace(actor: AuthorizedActor) {
+    const period = await this.database.prepare(`
+      SELECT ep.id, ep.name, ep.ends_at, ep.policy_version_id
+      FROM evaluation_periods ep
+      JOIN evaluation_participations participation
+        ON participation.period_id = ep.id AND participation.membership_id = ?
+      WHERE ep.organization_id = ? AND ep.status = 'open' AND participation.can_evaluate = 1
+      ORDER BY ep.starts_at DESC
+      LIMIT 1
+    `).bind(actor.membershipId, actor.organizationId).first<WorkspacePeriodRow>();
+
+    if (!period) return { period: null, criteria: [], assignments: [] };
+
+    const [criteria, assignments] = await Promise.all([
+      this.database.prepare(`
+        SELECT id, name, description, category
+        FROM criteria
+        WHERE policy_version_id = ? AND measurement_type = 'peer_rating' AND applicable_job_title IS NULL
+        ORDER BY created_at, id
+      `).bind(period.policy_version_id).all<WorkspaceCriterionRow>(),
+      this.database.prepare(`
+        SELECT
+          s.id AS shift_id,
+          s.starts_at,
+          s.ends_at,
+          s.section,
+          subject.id AS subject_membership_id,
+          subject_user.display_name AS subject_display_name,
+          subject.job_title AS subject_job_title
+        FROM shifts s
+        JOIN shift_assignments rater_assignment
+          ON rater_assignment.shift_id = s.id AND rater_assignment.membership_id = ?
+        JOIN shift_assignments subject_assignment
+          ON subject_assignment.shift_id = s.id AND subject_assignment.membership_id <> ?
+        JOIN memberships subject
+          ON subject.id = subject_assignment.membership_id AND subject.organization_id = ? AND subject.deleted_at IS NULL
+        JOIN users subject_user
+          ON subject_user.id = subject.user_id AND subject_user.status = 'active' AND subject_user.deleted_at IS NULL
+        JOIN evaluation_participations subject_participation
+          ON subject_participation.period_id = ? AND subject_participation.membership_id = subject.id AND subject_participation.can_be_evaluated = 1
+        LEFT JOIN evaluation_submissions submission
+          ON submission.period_id = ?
+          AND submission.shift_id = s.id
+          AND submission.rater_membership_id = ?
+          AND submission.subject_membership_id = subject.id
+          AND submission.status <> 'voided'
+        WHERE s.organization_id = ? AND s.status = 'closed' AND submission.id IS NULL
+        ORDER BY s.starts_at DESC, subject_user.display_name
+      `).bind(
+        actor.membershipId,
+        actor.membershipId,
+        actor.organizationId,
+        period.id,
+        period.id,
+        actor.membershipId,
+        actor.organizationId,
+      ).all<WorkspaceAssignmentRow>(),
+    ]);
+
+    return {
+      period: { id: period.id, name: period.name, endsAt: period.ends_at },
+      criteria: criteria.results,
+      assignments: assignments.results.map((row) => ({
+        shiftId: row.shift_id,
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
+        section: row.section,
+        subjectMembershipId: row.subject_membership_id,
+        subjectDisplayName: row.subject_display_name,
+        subjectJobTitle: row.subject_job_title,
+      })),
     };
   }
 

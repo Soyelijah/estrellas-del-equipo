@@ -1,5 +1,6 @@
 import { readAuthenticatedIdentity } from "../domain/identity.ts";
 import {
+  loadEvaluationWorkspace,
   submitEvaluation,
   type EvaluationRepository,
 } from "./evaluation-service.ts";
@@ -11,15 +12,32 @@ export async function handleEvaluationRequest(
   request: Request,
   dependencies: {
     repository: EvaluationRepository | null;
+    resolveIdentity?: (request: Request) => Promise<ReturnType<typeof readAuthenticatedIdentity>>;
     createId: () => string;
     now: () => string;
   },
 ): Promise<Response> {
+  const identity = dependencies.resolveIdentity
+    ? await dependencies.resolveIdentity(request)
+    : readAuthenticatedIdentity(request.headers);
+
+  if (request.method === "GET") {
+    if (!dependencies.repository) return json({ ok: false, error: "service_unavailable" }, 503);
+    try {
+      const result = await loadEvaluationWorkspace(
+        { identity, now: dependencies.now() },
+        { repository: dependencies.repository },
+      );
+      return json(result.ok ? { ok: true, workspace: result.workspace } : { ok: false, error: result.error }, result.status);
+    } catch {
+      return json({ ok: false, error: "internal_error" }, 500);
+    }
+  }
+
   if (!isSameOriginMutation(request)) {
     return json({ ok: false, error: "cross_origin_request" }, 403);
   }
 
-  const identity = readAuthenticatedIdentity(request.headers);
   if (!identity) {
     return json({ ok: false, error: "authentication_required" }, 401);
   }

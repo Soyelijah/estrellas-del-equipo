@@ -48,6 +48,20 @@ export type SubmissionEvidence = {
   validCriterionIds: string[];
 };
 
+export type EvaluationWorkspace = {
+  period: { id: string; name: string; endsAt: string } | null;
+  criteria: Array<{ id: string; name: string; description: string; category: string }>;
+  assignments: Array<{
+    shiftId: string;
+    startsAt: string;
+    endsAt: string;
+    section: string;
+    subjectMembershipId: string;
+    subjectDisplayName: string;
+    subjectJobTitle: string;
+  }>;
+};
+
 type SubmissionRecord = {
   submission: {
     id: string;
@@ -74,12 +88,34 @@ export interface EvaluationRepository {
     actor: AuthorizedActor,
     payload: EvaluationPayload,
   ): Promise<SubmissionEvidence | null>;
+  loadWorkspace(actor: AuthorizedActor): Promise<EvaluationWorkspace>;
   saveSubmission(
     record: SubmissionRecord,
   ): Promise<
     | { created: true }
     | { created: false; reason: "duplicate_submission" }
   >;
+}
+
+export async function loadEvaluationWorkspace(
+  input: { identity: AuthenticatedIdentity | null; now: string },
+  dependencies: { repository: EvaluationRepository },
+): Promise<
+  | { ok: true; status: 200; workspace: EvaluationWorkspace }
+  | { ok: false; status: 401 | 403; error: string }
+> {
+  if (!input.identity) return failure(401, "authentication_required");
+  const context = await dependencies.repository.findAuthorizationContext(input.identity.subjectId);
+  const authorization = authorizeMembership({
+    identity: input.identity,
+    user: context?.user ?? null,
+    membership: context?.membership ?? null,
+    organization: context?.organization ?? null,
+    now: input.now,
+  });
+  if (!authorization.ok) return failure(authorization.status, authorization.reason);
+  if (authorization.actor.role === "admin") return failure(403, "worker_required");
+  return { ok: true, status: 200, workspace: await dependencies.repository.loadWorkspace(authorization.actor) };
 }
 
 type SubmitEvaluationInput = {

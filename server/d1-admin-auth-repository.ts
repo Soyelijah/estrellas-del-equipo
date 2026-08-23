@@ -115,6 +115,22 @@ export class D1AdminAuthRepository {
           VALUES (?, ?, ?, 'worker', ?, ?, ?, ?, ?)
         `).bind(record.membership.id, record.membership.organizationId, record.membership.userId, record.user.jobTitle, record.membership.joinedAt, record.membership.tipFactorHundredths, record.membership.joinedAt, record.membership.joinedAt),
         this.database.prepare(`
+          INSERT INTO evaluation_participations (id, period_id, membership_id, can_evaluate, can_be_evaluated, exclusion_reason, created_at, updated_at)
+          SELECT ?, ep.id, ?, 1, ?, ?, ?, ?
+          FROM evaluation_periods ep
+          WHERE ep.organization_id = ? AND ep.status = 'open'
+          ORDER BY ep.starts_at DESC
+          LIMIT 1
+        `).bind(
+          crypto.randomUUID(),
+          record.membership.id,
+          record.user.jobTitle === "cashier" ? 0 : 1,
+          record.user.jobTitle === "cashier" ? "fixed_tip_share" : null,
+          record.membership.joinedAt,
+          record.membership.joinedAt,
+          record.membership.organizationId,
+        ),
+        this.database.prepare(`
           INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
           VALUES (?, ?, ?, 'user.created', 'user', ?, ?, ?)
         `).bind(crypto.randomUUID(), record.membership.organizationId, record.membership.createdByMembershipId, record.user.id, JSON.stringify({ jobTitle: record.user.jobTitle }), record.membership.joinedAt),
@@ -224,6 +240,147 @@ export class D1AdminAuthRepository {
       ORDER BY u.created_at, u.display_name
     `).bind(organizationId).all<{ id: string; displayName: string; loginIdentifier: string; status: string; role: string; jobTitle: string; tipFactorHundredths: number }>();
     return rows.results;
+  }
+
+  async getEvaluationOperations(organizationId: string) {
+    const [period, members, shifts] = await Promise.all([
+      this.database.prepare(`
+        SELECT ep.id, ep.name, ep.starts_at AS startsAt, ep.ends_at AS endsAt, ep.status,
+          (SELECT COUNT(*) FROM evaluation_submissions es WHERE es.period_id = ep.id AND es.status <> 'voided') AS submissionCount
+        FROM evaluation_periods ep
+        WHERE ep.organization_id = ? AND ep.status = 'open'
+        ORDER BY ep.starts_at DESC LIMIT 1
+      `).bind(organizationId).first<Record<string, unknown>>(),
+      this.database.prepare(`
+        SELECT m.id AS membershipId, u.display_name AS displayName, m.job_title AS jobTitle, u.status,
+          CASE WHEN u.status = 'active' THEN 1 ELSE 0 END AS canEvaluate,
+          CASE WHEN u.status = 'active' AND m.job_title <> 'cashier' THEN 1 ELSE 0 END AS canBeEvaluated
+        FROM memberships m
+        JOIN users u ON u.id = m.user_id
+        WHERE m.organization_id = ? AND m.role <> 'admin' AND m.deleted_at IS NULL AND u.deleted_at IS NULL
+        ORDER BY u.display_name
+      `).bind(organizationId).all<Record<string, unknown>>(),
+      this.database.prepare(`
+        SELECT s.id, s.starts_at AS startsAt, s.ends_at AS endsAt, s.section, s.status,
+          COUNT(sa.id) AS memberCount
+        FROM shifts s
+        LEFT JOIN shift_assignments sa ON sa.shift_id = s.id
+        WHERE s.organization_id = ?
+        GROUP BY s.id
+        ORDER BY s.starts_at DESC
+        LIMIT 20
+      `).bind(organizationId).all<Record<string, unknown>>(),
+    ]);
+    return {
+      period,
+      members: members.results.map((member) => ({ ...member, canEvaluate: member.canEvaluate === 1, canBeEvaluated: member.canBeEvaluated === 1 })),
+      shifts: shifts.results,
+    };
+  }
+
+  async openEvaluationCycle(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, unknown> & {
+      organizationId: string;
+      createdByMembershipId: string;
+      policyId: string;
+      periodId: string;
+      auditId: string;
+      name: string;
+      startsAt: string;
+      endsAt: string;
+      now: string;
+      criteria: Array<{ id: string; code: string; name: string; description: string; category: string; weightBasisPoints: number }>;
+    };
+    const existing = await this.database.prepare("SELECT id FROM evaluation_periods WHERE organization_id = ? AND status = 'open' LIMIT 1")
+      .bind(record.organizationId).first<{ id: string }>();
+    if (existing) return { created: false as const, reason: "open_cycle_exists" };
+
+    const members = await this.database.prepare(`
+      SELECT m.id, m.job_title
+      FROM memberships m JOIN users u ON u.id = m.user_id
+      WHERE m.organization_id = ? AND m.role <> 'admin' AND m.deleted_at IS NULL
+        AND u.status = 'active' AND u.deleted_at IS NULL
+    `).bind(record.organizationId).all<{ id: string; job_title: string }>();
+    if (members.results.length < 2) return { created: false as const, reason: "insufficient_workers" };
+
+    const versionRow = await this.database.prepare("SELECT COALESCE(MAX(version), 0) + 1 AS version FROM policy_versions WHERE organization_id = ?")
+      .bind(record.organizationId).first<{ version: number }>();
+    const statements = [
+      this.database.prepare(`
+        INSERT INTO policy_versions (id, organization_id, version, effective_from, status, minimum_raters, minimum_shifts, created_by_membership_id, created_at)
+        VALUES (?, ?, ?, ?, 'active', 2, 1, ?, ?)
+      `).bind(record.policyId, record.organizationId, versionRow?.version ?? 1, record.startsAt, record.createdByMembershipId, record.now),
+      ...record.criteria.map((criterion) => this.database.prepare(`
+        INSERT INTO criteria (id, policy_version_id, code, name, description, category, applicable_job_title, measurement_type, weight_basis_points, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, 'peer_rating', ?, ?)
+      `).bind(criterion.id, record.policyId, criterion.code, criterion.name, criterion.description, criterion.category, criterion.weightBasisPoints, record.now)),
+      this.database.prepare(`
+        INSERT INTO evaluation_periods (id, organization_id, policy_version_id, name, starts_at, ends_at, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'open', ?)
+      `).bind(record.periodId, record.organizationId, record.policyId, record.name, record.startsAt, record.endsAt, record.now),
+      ...members.results.map((member) => this.database.prepare(`
+        INSERT INTO evaluation_participations (id, period_id, membership_id, can_evaluate, can_be_evaluated, exclusion_reason, created_at, updated_at)
+        VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+      `).bind(
+        crypto.randomUUID(),
+        record.periodId,
+        member.id,
+        member.job_title === "cashier" ? 0 : 1,
+        member.job_title === "cashier" ? "fixed_tip_share" : null,
+        record.now,
+        record.now,
+      )),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
+        VALUES (?, ?, ?, 'evaluation.cycle_opened', 'evaluation_period', ?, ?, ?)
+      `).bind(record.auditId, record.organizationId, record.createdByMembershipId, record.periodId, JSON.stringify({ name: record.name }), record.now),
+    ];
+    await this.database.batch(statements);
+    return { created: true as const };
+  }
+
+  async createEvaluationShift(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, unknown> & {
+      id: string;
+      auditId: string;
+      organizationId: string;
+      createdByMembershipId: string;
+      section: string;
+      startsAt: string;
+      endsAt: string;
+      membershipIds: string[];
+      now: string;
+    };
+    const period = await this.database.prepare("SELECT id FROM evaluation_periods WHERE organization_id = ? AND status = 'open' ORDER BY starts_at DESC LIMIT 1")
+      .bind(record.organizationId).first<{ id: string }>();
+    if (!period) return { created: false as const, reason: "evaluation_cycle_required" };
+
+    const placeholders = record.membershipIds.map(() => "?").join(", ");
+    const members = await this.database.prepare(`
+      SELECT m.id, m.job_title
+      FROM memberships m
+      JOIN users u ON u.id = m.user_id
+      JOIN evaluation_participations ep ON ep.membership_id = m.id AND ep.period_id = ? AND ep.can_evaluate = 1
+      WHERE m.organization_id = ? AND m.role <> 'admin' AND m.id IN (${placeholders})
+        AND m.deleted_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL
+    `).bind(period.id, record.organizationId, ...record.membershipIds).all<{ id: string; job_title: string }>();
+    if (members.results.length !== record.membershipIds.length) return { created: false as const, reason: "invalid_shift_members" };
+
+    await this.database.batch([
+      this.database.prepare(`
+        INSERT INTO shifts (id, organization_id, starts_at, ends_at, section, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'closed', ?)
+      `).bind(record.id, record.organizationId, record.startsAt, record.endsAt, record.section, record.now),
+      ...members.results.map((member) => this.database.prepare(`
+        INSERT INTO shift_assignments (id, shift_id, membership_id, role_during_shift, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(crypto.randomUUID(), record.id, member.id, member.job_title, record.now)),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
+        VALUES (?, ?, ?, 'evaluation.shift_recorded', 'shift', ?, ?, ?)
+      `).bind(record.auditId, record.organizationId, record.createdByMembershipId, record.id, JSON.stringify({ section: record.section, memberCount: members.results.length }), record.now),
+    ]);
+    return { created: true as const };
   }
 
   async listAuditEvents(organizationId: string, limit: number) {

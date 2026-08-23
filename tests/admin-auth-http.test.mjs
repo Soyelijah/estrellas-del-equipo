@@ -28,6 +28,9 @@ function dependencies(overrides = {}) {
       async revokeSession() {},
       async listOrganizationUsers() { return []; },
       async listAuditEvents() { return []; },
+      async getEvaluationOperations() { return { period: null, shifts: [], members: [] }; },
+      async openEvaluationCycle() { return { created: true }; },
+      async createEvaluationShift() { return { created: true }; },
       ...repositoryOverrides,
     },
     createId: (() => { let id = 0; return () => `id-${++id}`; })(),
@@ -200,4 +203,36 @@ test("forbids a worker from reading administrative audit events", async () => {
   const response = await handleAdminAuthRequest(new Request("https://equipo.example/api/admin/audit", { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository: { async findSessionActor() { return { userId: "worker", displayName: "Garzón", role: "worker", organizationId: "o1", membershipId: "mw" }; } } }));
   assert.equal(response.status, 403);
   assert.deepEqual(await response.json(), { ok: false, error: "admin_required" });
+});
+
+test("lets only the administrator load and configure real evaluation operations", async () => {
+  const actor = { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" };
+  const operations = { period: null, shifts: [], members: [{ membershipId: "m-worker", displayName: "Garzón", jobTitle: "waiter", status: "active" }] };
+  const repository = {
+    async findSessionActor() { return actor; },
+    async getEvaluationOperations(organizationId) { assert.equal(organizationId, "o1"); return operations; },
+  };
+  const response = await handleAdminAuthRequest(new Request("https://equipo.example/api/admin/evaluation-operations", { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, operations });
+});
+
+test("opens an evaluation cycle and registers a completed shared shift", async () => {
+  const calls = [];
+  const actor = { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" };
+  const repository = {
+    async findSessionActor() { return actor; },
+    async openEvaluationCycle(record) { calls.push({ type: "cycle", record }); return { created: true }; },
+    async createEvaluationShift(record) { calls.push({ type: "shift", record }); return { created: true }; },
+  };
+  const headers = { cookie: "estrellas_session=private-cookie-token" };
+  const cycle = await handleAdminAuthRequest(mutation("/api/admin/evaluation-cycles", { name: "Ciclo agosto", startsAt: "2026-08-23T00:00:00.000Z", endsAt: "2026-09-23T23:59:59.000Z" }, headers), dependencies({ repository }));
+  const shift = await handleAdminAuthRequest(mutation("/api/admin/evaluation-shifts", { section: "Salón principal", startsAt: "2026-08-22T18:00:00.000Z", endsAt: "2026-08-23T02:00:00.000Z", membershipIds: ["m-worker-1", "m-worker-2"] }, headers), dependencies({ repository }));
+
+  assert.deepEqual([cycle.status, shift.status], [201, 201]);
+  assert.equal(calls[0].record.organizationId, "o1");
+  assert.equal(calls[0].record.createdByMembershipId, "m-admin");
+  assert.equal(calls[0].record.criteria.length, 6);
+  assert.deepEqual(calls[1].record.membershipIds, ["m-worker-1", "m-worker-2"]);
 });

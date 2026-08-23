@@ -1,8 +1,10 @@
-export type AppView = "inicio" | "equipo" | "credenciales" | "auditoria" | "evaluaciones" | "acuerdo";
+export type AppView = "inicio" | "equipo" | "operacion" | "credenciales" | "auditoria" | "evaluaciones" | "acuerdo";
 
 const adminNavigation = [
   { id: "inicio", label: "Inicio", icon: "⌂" },
   { id: "equipo", label: "Equipo", icon: "♙" },
+  { id: "operacion", label: "Evaluaciones", icon: "✦" },
+  { id: "acuerdo", label: "Propinas", icon: "♢" },
   { id: "credenciales", label: "Credenciales", icon: "◇" },
   { id: "auditoria", label: "Auditoría", icon: "◎" },
 ] as const;

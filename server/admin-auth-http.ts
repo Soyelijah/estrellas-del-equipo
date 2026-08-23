@@ -1,4 +1,5 @@
 import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from "./admin-auth-service.ts";
+import { openEvaluationCycle, registerEvaluationShift } from "./evaluation-admin-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
 const COOKIE_NAME = "estrellas_session";
@@ -21,6 +22,9 @@ type AuthDependencies = {
     revokeSession(tokenHash: string, now: string): Promise<void>;
     listOrganizationUsers(organizationId: string): Promise<unknown[]>;
     listAuditEvents(organizationId: string, limit: number): Promise<unknown[]>;
+    getEvaluationOperations(organizationId: string): Promise<unknown>;
+    openEvaluationCycle(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
+    createEvaluationShift(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
   };
   createId(): string;
   createToken(): string;
@@ -47,6 +51,10 @@ function cookieValue(request: Request, cookieName = COOKIE_NAME): string | null 
     if (name === cookieName) return value.join("=") || null;
   }
   return null;
+}
+
+export function readSessionToken(request: Request): string | null {
+  return cookieValue(request);
 }
 
 function setupCookie(request: Request, token: string, clear = false): string {
@@ -124,11 +132,40 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       return json({ ok: true, events: await dependencies.repository.listAuditEvents(actor.organizationId, limit) });
     }
 
+    if (path === "/api/admin/evaluation-operations" && request.method === "GET") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      if (actor.role !== "admin") return json({ ok: false, error: "admin_required" }, 403);
+      return json({ ok: true, operations: await dependencies.repository.getEvaluationOperations(actor.organizationId) });
+    }
+
     if (request.method !== "POST" && request.method !== "PATCH") return json({ ok: false, error: "method_not_allowed" }, 405, { allow: "GET, POST, PATCH" });
     if (!isSameOriginMutation(request)) return json({ ok: false, error: "cross_origin_request" }, 403);
     const parsed = await readBody(request);
     if (!parsed.ok) return parsed.response;
     const serviceDependencies = { ...dependencies, now: dependencies.now() };
+
+    if (path === "/api/admin/evaluation-cycles") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const result = await openEvaluationCycle(parsed.body, actor, {
+        repository: dependencies.repository,
+        createId: dependencies.createId,
+        now: serviceDependencies.now,
+      });
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
+    }
+
+    if (path === "/api/admin/evaluation-shifts") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const result = await registerEvaluationShift(parsed.body, actor, {
+        repository: dependencies.repository,
+        createId: dependencies.createId,
+        now: serviceDependencies.now,
+      });
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
+    }
 
     if (path === "/api/auth/bootstrap/unlock") {
       const bootstrap = await dependencies.repository.getBootstrapState();

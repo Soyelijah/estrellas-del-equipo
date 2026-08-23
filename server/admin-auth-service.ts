@@ -10,7 +10,7 @@ type AccountInput = {
 type BootstrapInput = AccountInput & { organizationName: string };
 type ManagedUserInput = AccountInput & { jobTitle: JobTitle; tipPercentage: string | number };
 
-type SessionActor = { role: Role; organizationId: string; membershipId: string };
+export type SessionActor = { role: Role; organizationId: string; membershipId: string };
 
 type Dependencies = {
   repository: {

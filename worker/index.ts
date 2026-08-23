@@ -4,7 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { D1EvaluationRepository } from "../server/d1-evaluation-repository";
 import { handleEvaluationRequest } from "../server/evaluation-http";
 import { D1AdminAuthRepository } from "../server/d1-admin-auth-repository";
-import { handleAdminAuthRequest } from "../server/admin-auth-http";
+import { handleAdminAuthRequest, readSessionToken } from "../server/admin-auth-http";
 import { createSessionToken, hashPassword, hashSessionToken, verifyPassword } from "../server/passwords";
 import { createRecoveryGrant, createSetupGrant, verifyRecoveryGrant, verifySetupAccessKey, verifySetupGrant } from "../server/setup-access";
 
@@ -73,18 +73,25 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     }
 
     if (url.pathname === "/api/evaluations") {
-      if (request.method !== "POST") {
+      if (request.method !== "GET" && request.method !== "POST") {
         return Response.json(
           { ok: false, error: "method_not_allowed" },
           {
             status: 405,
-            headers: { allow: "POST", "cache-control": "no-store" },
+            headers: { allow: "GET, POST", "cache-control": "no-store" },
           },
         );
       }
 
+      const adminRepository = env.DB ? new D1AdminAuthRepository(env.DB) : null;
       return handleEvaluationRequest(request, {
         repository: env.DB ? new D1EvaluationRepository(env.DB) : null,
+        resolveIdentity: async (evaluationRequest) => {
+          const token = readSessionToken(evaluationRequest);
+          if (!token || !adminRepository) return null;
+          const actor = await adminRepository.findSessionActor(await hashSessionToken(token), new Date().toISOString());
+          return actor ? { subjectId: `local:${actor.userId}`, email: `${actor.userId}@local.invalid`, displayName: actor.displayName } : null;
+        },
         createId: () => crypto.randomUUID(),
         now: () => new Date().toISOString(),
       });
