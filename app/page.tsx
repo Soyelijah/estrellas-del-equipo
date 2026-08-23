@@ -2,267 +2,124 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { allocateTipPoolByExperienceFactors, formatExperienceFactor } from "../domain/tips";
+import { AppView, navigationForRole, onboardingForTeam } from "./view-model";
 
-type View = "inicio" | "equipo" | "evaluaciones" | "acuerdo";
+const jobTitles = { head_waiter: "Jefe de garzones", waiter: "Garzón", bartender: "Barman", cashier: "Cajera" } as const;
+type JobTitle = keyof typeof jobTitles;
 type Account = { displayName: string; role: string };
-type StoredUser = { id: string; displayName: string; loginIdentifier: string; status: string; role: string; jobTitle: keyof typeof jobTitles; tipFactorHundredths: number };
-type AuthState = { loading: boolean; bootstrapAllowed: boolean; setupUnlocked: boolean; account: Account | null; users: StoredUser[]; unavailable: boolean };
+type TeamMember = { id: string; displayName: string; status: string; role: string; jobTitle: JobTitle; tipFactorHundredths: number };
+type StoredUser = TeamMember & { loginIdentifier: string };
+type AuditEvent = { id: string; action: string; objectType: string; objectId: string; reason: string | null; metadata: Record<string, unknown>; createdAt: string; actorDisplayName: string | null };
+type AuthState = { loading: boolean; bootstrapAllowed: boolean; setupUnlocked: boolean; recoveryUnlocked: boolean; account: Account | null; users: StoredUser[]; team: TeamMember[]; unavailable: boolean };
+type AccessMode = "login" | "setup-key" | "setup-account" | "recovery-key" | "recovery-password";
 
-const jobTitles = {
-  head_waiter: "Jefe de garzones",
-  waiter: "Garzón",
-  bartender: "Barman",
-  cashier: "Cajera",
-} as const;
+const initialAuth: AuthState = { loading: true, bootstrapAllowed: false, setupUnlocked: false, recoveryUnlocked: false, account: null, users: [], team: [], unavailable: false };
 const clpFormatter = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
-
-function initials(label: string) {
-  return label.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-}
+const auditLabels: Record<string, string> = { "user.created": "Cuenta creada", "user.updated": "Datos actualizados", "user.suspended": "Cuenta suspendida", "user.reactivated": "Cuenta reactivada", "user.password_reset": "Contraseña restablecida", "admin.password_recovered": "Acceso administrador recuperado" };
+function initials(label: string) { return label.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
+function statusLabel(status: string) { return status === "active" ? "Activa" : status === "disabled" ? "Suspendida" : status; }
 
 export default function Home() {
-  const [view, setView] = useState<View>("inicio");
-  const [tipPoolPesos, setTipPoolPesos] = useState(0);
-  const [auth, setAuth] = useState<AuthState>({ loading: true, bootstrapAllowed: false, setupUnlocked: false, account: null, users: [], unavailable: false });
-  const [accountMessage, setAccountMessage] = useState("");
+  const [auth, setAuth] = useState<AuthState>(initialAuth);
+  const [view, setView] = useState<AppView>("inicio");
+  const [accessMode, setAccessMode] = useState<AccessMode>("login");
+  const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [tipPoolPesos, setTipPoolPesos] = useState(0);
 
-  async function refreshAuth() {
-    try {
-      const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
-      if (!response.ok) throw new Error("unavailable");
-      const data = await response.json() as Omit<AuthState, "loading" | "unavailable">;
-      setAuth({ loading: false, bootstrapAllowed: data.bootstrapAllowed, setupUnlocked: data.setupUnlocked, account: data.account, users: data.users, unavailable: false });
-    } catch {
-      setAuth((current) => ({ ...current, loading: false, unavailable: true }));
+  function applyAuth(data: Omit<AuthState, "loading" | "unavailable">) {
+    setAuth({ ...data, loading: false, unavailable: false });
+    if (!data.account) {
+      if (data.bootstrapAllowed) setAccessMode(data.setupUnlocked ? "setup-account" : "setup-key");
+      else if (data.recoveryUnlocked) setAccessMode("recovery-password");
+      else setAccessMode((current) => current === "recovery-key" ? current : "login");
     }
   }
-
+  async function refreshAuth() {
+    try { const response = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" }); if (!response.ok) throw new Error("unavailable"); applyAuth(await response.json() as Omit<AuthState, "loading" | "unavailable">); }
+    catch { setAuth((current) => ({ ...current, loading: false, unavailable: true })); }
+  }
   useEffect(() => {
     let active = true;
     fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("unavailable");
-        return response.json() as Promise<Omit<AuthState, "loading" | "unavailable">>;
-      })
-      .then((data) => {
-        if (active) setAuth({ loading: false, bootstrapAllowed: data.bootstrapAllowed, setupUnlocked: data.setupUnlocked, account: data.account, users: data.users, unavailable: false });
-      })
-      .catch(() => {
-        if (active) setAuth((current) => ({ ...current, loading: false, unavailable: true }));
-      });
+      .then(async (response) => { if (!response.ok) throw new Error("unavailable"); return response.json() as Promise<Omit<AuthState, "loading" | "unavailable">>; })
+      .then((data) => { if (active) applyAuth(data); })
+      .catch(() => { if (active) setAuth((current) => ({ ...current, loading: false, unavailable: true })); });
     return () => { active = false; };
   }, []);
 
-  async function submitAccount(event: FormEvent<HTMLFormElement>, path: string) {
-    event.preventDefault();
-    setSubmitting(true);
-    setAccountMessage("");
-    const form = event.currentTarget;
-    const body = Object.fromEntries(new FormData(form));
-    try {
-      const response = await fetch(path, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const result = await response.json() as { ok: boolean; error?: string };
-      if (!response.ok) {
-        const messages: Record<string, string> = {
-          invalid_account_data: "Revisa los datos. El usuario debe tener al menos 3 caracteres y la contraseña al menos 12.",
-          invalid_credentials: "Usuario o contraseña incorrectos.",
-          login_identifier_exists: "Ese usuario ya existe.",
-          bootstrap_closed: "La cuenta administradora ya fue activada.",
-          invalid_access_key: "La clave de acceso no es válida.",
-          setup_access_required: "Valida primero la clave única de activación.",
-          setup_access_unavailable: "La clave única todavía no está configurada en el servidor.",
-        };
-        setAccountMessage(messages[result.error ?? ""] ?? "No fue posible guardar la cuenta.");
-        return;
-      }
-      form.reset();
-      setAccountMessage(path === "/api/admin/users" ? "Cuenta creada y guardada en la base de datos." : path === "/api/auth/bootstrap/unlock" ? "Clave validada. Completa ahora la cuenta administradora." : path === "/api/auth/bootstrap" ? "Cuenta creada. Inicia sesión para entrar." : "Sesión iniciada.");
-      await refreshAuth();
-    } catch {
-      setAccountMessage("No se pudo conectar con la base de datos local.");
-    } finally {
-      setSubmitting(false);
-    }
+  async function requestJson(path: string, method: "POST" | "PATCH", body: Record<string, unknown>) {
+    const response = await fetch(path, { method, credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { response, result: await response.json() as { ok: boolean; error?: string } };
   }
-
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" });
-    setAccountMessage("");
-    await refreshAuth();
+  function friendlyError(error?: string) {
+    const errors: Record<string, string> = {
+      invalid_account_data: "Revisa los datos y usa una contraseña de al menos 12 caracteres.", invalid_credentials: "Usuario o contraseña incorrectos.", login_identifier_exists: "Ese nombre de usuario ya está ocupado.", bootstrap_closed: "La cuenta administradora ya está configurada.", invalid_access_key: "La clave única no es válida.", setup_access_required: "Valida primero la clave única.", setup_access_unavailable: "La clave única no está configurada en el servidor.", recovery_access_required: "La autorización venció. Valida nuevamente la clave única.", invalid_recovery: "No fue posible recuperar esa cuenta.", invalid_recovery_data: "Revisa el usuario y la nueva contraseña.", managed_user_not_found: "La cuenta ya no está disponible.", admin_required: "Esta acción requiere una cuenta administradora.",
+    };
+    return errors[error ?? ""] ?? "No fue posible completar la acción.";
   }
-  const realTeam = auth.users;
-  const totalFactorHundredths = realTeam.reduce((sum, member) => sum + member.tipFactorHundredths, 0);
-  const evaluatorCount = realTeam.length;
-  const evaluationSubjectCount = realTeam.filter(({ jobTitle }) => jobTitle !== "cashier").length;
-  const tipSimulation = useMemo(
-    () => realTeam.length === 0 ? [] : allocateTipPoolByExperienceFactors(
-      tipPoolPesos,
-      realTeam.map(({ id, tipFactorHundredths }) => ({ participantId: id, factorHundredths: tipFactorHundredths })),
-    ),
-    [tipPoolPesos, realTeam],
-  );
-
-  if (auth.loading) {
-    return (
-      <main className="access-shell access-loading" aria-busy="true">
-        <div className="access-brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div>
-        <p>Preparando el acceso…</p>
-      </main>
-    );
+  async function submitAccess(event: FormEvent<HTMLFormElement>, path: string) {
+    event.preventDefault(); setSubmitting(true); setMessage(""); const form = event.currentTarget;
+    try { const { response, result } = await requestJson(path, "POST", Object.fromEntries(new FormData(form))); if (!response.ok) { setMessage(friendlyError(result.error)); return; } form.reset(); if (path.endsWith("/unlock")) setMessage("Clave validada. La autorización dura 10 minutos."); else if (path.endsWith("/bootstrap")) setMessage("Cuenta creada. Inicia sesión con tus credenciales."); else if (path.endsWith("/complete")) { setAccessMode("login"); setMessage("Contraseña actualizada. Las sesiones anteriores fueron cerradas."); } else setMessage("Sesión iniciada."); await refreshAuth(); }
+    catch { setMessage("No se pudo conectar con el sistema."); } finally { setSubmitting(false); }
   }
-
-  if (auth.unavailable) {
-    return (
-      <main className="access-shell">
-        <div className="access-brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div>
-        <section className="access-problem" role="alert"><span>!</span><h1>No se pudo abrir el acceso</h1><p>La base de datos local no está respondiendo. Reinicia el servidor y vuelve a intentarlo.</p><button className="primary" onClick={() => void refreshAuth()}>Volver a intentar</button></section>
-      </main>
-    );
+  async function submitAdmin(event: FormEvent<HTMLFormElement>, path: string, method: "POST" | "PATCH" = "POST") {
+    event.preventDefault(); setSubmitting(true); setMessage(""); const form = event.currentTarget;
+    try { const { response, result } = await requestJson(path, method, Object.fromEntries(new FormData(form))); if (!response.ok) { setMessage(friendlyError(result.error)); return; } form.reset(); setSelectedUserId(null); setMessage("Cambio guardado y registrado en la auditoría."); await refreshAuth(); }
+    catch { setMessage("No se pudo conectar con el sistema."); } finally { setSubmitting(false); }
   }
-
-  if (!auth.account) {
-    return (
-      <main className="access-shell premium-access">
-        <div className="access-aurora" aria-hidden="true" />
-        <div className="access-constellation" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <i key={index} />)}</div>
-        <header className="access-header"><div className="access-brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div><span>Acceso del equipo</span></header>
-        <section className="access-stage">
-          <div className="access-intro">
-            <span className="access-kicker">{auth.bootstrapAllowed ? "Apertura protegida" : "Bienvenido de vuelta"}</span>
-            <h1>{auth.bootstrapAllowed ? "La puerta del equipo se abre una sola vez." : "Tu jornada empieza aquí."}</h1>
-            <p>{auth.bootstrapAllowed ? "Primero valida la clave única del sistema. Después podrás registrar la cuenta de quien administrará el equipo." : "Entra con tu cuenta personal. Tu identidad mantiene cada acción y evaluación correctamente atribuida."}</p>
-            <div className="access-trust"><span>Contraseña protegida</span><span>Sesión privada</span><span>Una cuenta por persona</span></div>
-          </div>
-          {auth.bootstrapAllowed && !auth.setupUnlocked ? (
-            <form className="access-form setup-key-form" onSubmit={(event) => void submitAccount(event, "/api/auth/bootstrap/unlock")} aria-labelledby="setup-key-title">
-              <div className="access-form-heading"><span className="form-emblem">✦</span><div><span className="section-kicker">PASO 1 DE 2</span><h2 id="setup-key-title">Clave única de acceso</h2><p>Solo quien posea esta clave puede abrir el registro administrativo.</p></div></div>
-              <label>Clave de activación<div className="secret-input"><input name="accessKey" type={showPassword ? "text" : "password"} required minLength={20} maxLength={200} autoComplete="one-time-code" autoFocus /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Ocultar clave" : "Mostrar clave"}>{showPassword ? "Ocultar" : "Ver"}</button></div></label>
-              <div className="key-assurance"><span>Uso único</span><span>Validación en servidor</span><span>No se guarda en el navegador</span></div>
-              <button className="access-submit" disabled={submitting}><span>{submitting ? "Validando…" : "Validar y continuar"}</span><b>→</b></button>
-              {accountMessage && <p className="form-message" role="status">{accountMessage}</p>}
-            </form>
-          ) : auth.bootstrapAllowed ? (
-            <form className="access-form" onSubmit={(event) => void submitAccount(event, "/api/auth/bootstrap")} aria-labelledby="bootstrap-title">
-              <div className="access-form-heading"><span className="form-emblem success-emblem">✓</span><div><span className="section-kicker">PASO 2 DE 2</span><h2 id="bootstrap-title">Cuenta administradora</h2><p>Clave validada. Esta activación se cerrará al guardar.</p></div></div>
-              <label>Nombre del restaurante<input name="organizationName" required minLength={2} maxLength={120} autoComplete="organization" /></label>
-              <label>Tu nombre o alias<input name="displayName" required minLength={2} maxLength={100} autoComplete="name" /></label>
-              <label>Usuario<input name="loginIdentifier" required minLength={3} maxLength={80} autoComplete="username" spellCheck={false} /></label>
-              <label>Contraseña<div className="secret-input"><input name="password" type={showPassword ? "text" : "password"} required minLength={12} maxLength={128} autoComplete="new-password" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>{showPassword ? "Ocultar" : "Ver"}</button></div></label>
-              <small>Usa al menos 12 caracteres y no compartas esta contraseña.</small>
-              <button className="access-submit" disabled={submitting}><span>{submitting ? "Creando cuenta…" : "Crear cuenta administradora"}</span><b>→</b></button>
-              {accountMessage && <p className="form-message" role="status">{accountMessage}</p>}
-            </form>
-          ) : (
-            <form className="access-form" onSubmit={(event) => void submitAccount(event, "/api/auth/login")} aria-labelledby="login-title">
-              <div className="access-form-heading"><span className="form-emblem">☆</span><div><span className="section-kicker">ACCESO PERSONAL</span><h2 id="login-title">Iniciar sesión</h2><p>Tu usuario identifica tus evaluaciones y acciones.</p></div></div>
-              <label>Usuario<input name="loginIdentifier" required autoComplete="username" autoFocus /></label>
-              <label>Contraseña<div className="secret-input"><input name="password" type={showPassword ? "text" : "password"} required autoComplete="current-password" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>{showPassword ? "Ocultar" : "Ver"}</button></div></label>
-              <button className="access-submit" disabled={submitting}><span>{submitting ? "Comprobando acceso…" : "Entrar al sistema"}</span><b>→</b></button>
-              {accountMessage && <p className="form-message" role="status">{accountMessage}</p>}
-            </form>
-          )}
-        </section>
-        <footer className="access-footer"><span>Uso interno del equipo</span><span>Los resultados solo se generan con registros reales.</span></footer>
-      </main>
-    );
+  async function changeStatus(user: StoredUser) {
+    setSubmitting(true); setMessage("");
+    try { const status = user.status === "active" ? "suspended" : "active"; const { response, result } = await requestJson(`/api/admin/users/${user.id}/status`, "POST", { status }); if (!response.ok) { setMessage(friendlyError(result.error)); return; } setMessage(status === "active" ? "Cuenta reactivada." : "Cuenta suspendida y sus sesiones cerradas."); await refreshAuth(); }
+    catch { setMessage("No se pudo conectar con el sistema."); } finally { setSubmitting(false); }
   }
+  async function loadAudit() { setAuditLoading(true); try { const response = await fetch("/api/admin/audit?limit=50", { credentials: "same-origin", cache: "no-store" }); const data = await response.json() as { events?: AuditEvent[] }; setAuditEvents(response.ok ? data.events ?? [] : []); } finally { setAuditLoading(false); } }
+  async function logout() { await requestJson("/api/auth/logout", "POST", {}); setMessage(""); setAuditEvents([]); setView("inicio"); await refreshAuth(); }
 
-  return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div>
-        <nav aria-label="Navegación principal">
-          <button className={view === "inicio" ? "active" : ""} onClick={() => setView("inicio")}><span>⌂</span>Inicio</button>
-          <button className={view === "equipo" ? "active" : ""} onClick={() => setView("equipo")}><span>♙</span>Equipo</button>
-          <button className={view === "evaluaciones" ? "active" : ""} onClick={() => setView("evaluaciones")}><span>☆</span>Evaluaciones</button>
-          <button className={view === "acuerdo" ? "active" : ""} onClick={() => setView("acuerdo")}><span>♢</span>Propinas</button>
-        </nav>
-        <div className="sidebar-note verified-note"><span>Datos reales</span><p>El equipo y sus factores se muestran únicamente después de guardarlos en la base de datos.</p></div>
-        <div className="profile pending-profile"><div className="avatar small neutral-avatar">{auth.account ? initials(auth.account.displayName) : "—"}</div><div><strong>{auth.account?.displayName ?? "Sin sesión iniciada"}</strong><span>{auth.account ? (auth.account.role === "admin" ? "Administrador" : "Trabajador") : "Acceso personal"}</span></div>{auth.account && <button className="logout-button" onClick={() => void logout()}>Salir</button>}</div>
-      </aside>
+  const selectedUser = auth.users.find(({ id }) => id === selectedUserId) ?? null;
+  const activeTeam = auth.team.filter(({ status }) => status === "active");
+  const totalFactorHundredths = activeTeam.reduce((sum, member) => sum + member.tipFactorHundredths, 0);
+  const onboarding = onboardingForTeam(auth.team);
+  const allowedViews = auth.account ? navigationForRole(auth.account.role).map((item) => item.id as AppView) : ["inicio" as AppView];
+  const currentView = allowedViews.includes(view) ? view : "inicio";
+  const tipSimulation = useMemo(() => activeTeam.length === 0 ? [] : allocateTipPoolByExperienceFactors(tipPoolPesos, activeTeam.map(({ id, tipFactorHundredths }) => ({ participantId: id, factorHundredths: tipFactorHundredths }))), [tipPoolPesos, activeTeam]);
 
-      <section className="content">
-        <div className="data-banner" role="status"><strong>{auth.account ? "Sesión real activa" : "Configuración confirmada"}</strong><span>{auth.account ? `${auth.account.displayName} está conectado a la base de datos.` : "Sin puntajes, turnos, identidades ni recompensas inventadas."}</span></div>
-        <header className="topbar"><div><p className="eyebrow">ESTADO REAL DEL SISTEMA</p><h1>Equipo y acuerdo de propinas</h1></div><span className="status neutral">Configuración inicial</span></header>
+  if (auth.loading) return <main className="access-shell access-loading" aria-busy="true"><Brand /><p>Preparando el acceso…</p></main>;
+  if (auth.unavailable) return <main className="access-shell"><Brand /><section className="access-problem" role="alert"><span>!</span><h1>No se pudo abrir el acceso</h1><p>La base de datos no está respondiendo.</p><button className="primary" onClick={() => void refreshAuth()}>Volver a intentar</button></section></main>;
+  if (!auth.account) return <AccessGate mode={accessMode} setMode={setAccessMode} message={message} submitting={submitting} showSecret={showSecret} setShowSecret={setShowSecret} submit={submitAccess} bootstrapAllowed={auth.bootstrapAllowed} />;
 
-        {view === "inicio" && (
-          <>
-            <section className="hero real-data-hero">
-              <div className="hero-copy">
-                <span className="pill olive">Base acordada lista</span>
-                <h2>Primero la verdad de los datos.</h2>
-                <p>La aplicación conserva únicamente los cargos, permisos de evaluación y factores de experiencia confirmados. Hasta que existan cuentas y turnos reales, no se mostrarán evaluaciones ni resultados.</p>
-                <button className="primary" onClick={() => setView("equipo")}>Revisar configuración <span>→</span></button>
-                <div className="privacy-line"><span>✓</span> Sin notas simuladas · Sin rankings ficticios · Sin consecuencias automáticas</div>
-              </div>
-              <div className="setup-card">
-                <span className="setup-icon">◎</span><strong>Falta activar la operación</strong>
-                <p>Se deben crear las cuentas, registrar un turno y abrir un período antes de evaluar.</p>
-                <div className="setup-steps"><span className="done">✓ Acuerdo del equipo</span><span>○ Cuentas personales</span><span>○ Primer turno</span><span>○ Primera evaluación</span></div>
-              </div>
-            </section>
-            <section className="metric-grid real-metrics">
-              <article><div className="metric-icon coral">♙</div><div><span>Trabajadores registrados</span><strong>{realTeam.length}</strong><small>Cuentas creadas por ti</small></div></article>
-              <article><div className="metric-icon olive">✓</div><div><span>Pueden evaluar</span><strong>{evaluatorCount}</strong><small>Según cuentas activas</small></div></article>
-              <article><div className="metric-icon blue">☆</div><div><span>Pueden ser evaluados</span><strong>{evaluationSubjectCount}</strong><small>La cajera queda fuera</small></div></article>
-              <article><div className="metric-icon gold">◎</div><div><span>Factores totales</span><strong>{formatExperienceFactor(totalFactorHundredths)}</strong><small>Puntos de experiencia</small></div></article>
-            </section>
-            <section className="two-column">
-              <article className="panel empty-summary"><div className="panel-head"><div><span className="section-kicker">EVALUACIONES</span><h3>Aún no hay evaluaciones registradas</h3></div></div><p>Cuando un usuario real complete una evaluación correspondiente a un turno registrado, su estado aparecerá aquí. No se calcula ningún resultado con datos de ejemplo.</p></article>
-              <article className="panel empty-summary"><div className="panel-head"><div><span className="section-kicker">ACTIVACIÓN</span><h3>Datos necesarios para comenzar</h3></div></div><ul className="clean-list"><li>Nombre o alias definitivo de cada trabajador.</li><li>Cuenta personal y acceso seguro.</li><li>Fecha, horario y participantes del turno.</li><li>Período y criterios aprobados.</li></ul></article>
-            </section>
-          </>
-        )}
-
-        {view === "equipo" && (
-          <section className="data-section">
-            <div className="section-heading"><div><p className="eyebrow">REGISTROS DE LA BASE DE DATOS</p><h2>Equipo</h2><span>Solo aparecen las cuentas que tú hayas creado con sus datos y factor acordado.</span></div><span className="status complete">{realTeam.length} trabajadores</span></div>
-            {realTeam.length === 0 ? <div className="empty-state compact-empty" role="status"><span className="empty-icon">♙</span><h3>Aún no has agregado trabajadores</h3><p>Crea la primera cuenta con su nombre, cargo, credenciales y porcentaje de experiencia.</p></div> : <div className="team-table-wrap"><table className="team-table"><caption>Trabajadores reales guardados</caption><thead><tr><th scope="col">Trabajador</th><th scope="col">Cargo</th><th scope="col">Factor</th><th scope="col">Evalúa</th><th scope="col">Es evaluado</th></tr></thead><tbody>
-              {realTeam.map((member) => { const canBeEvaluated = member.jobTitle !== "cashier"; return <tr key={member.id}><td><span className="avatar tiny">{initials(member.displayName)}</span><strong>{member.displayName}</strong></td><td>{jobTitles[member.jobTitle]}</td><td><strong>{formatExperienceFactor(member.tipFactorHundredths)}</strong></td><td><span className="permission yes">Sí</span></td><td><span className={canBeEvaluated ? "permission yes" : "permission no"}>{canBeEvaluated ? "Sí" : "No"}</span></td></tr>; })}
-            </tbody></table></div>}
-            {auth.account?.role === "admin" && (
-              <div className="account-admin-grid">
-                <form className="panel account-form" onSubmit={(event) => void submitAccount(event, "/api/admin/users")}>
-                  <div><span className="section-kicker">ADMINISTRACIÓN</span><h3>Crear una cuenta real</h3><p>El trabajador podrá entrar con este usuario y contraseña.</p></div>
-                  <label>Nombre o alias<input name="displayName" required minLength={2} maxLength={100} autoComplete="off" /></label>
-                  <label>Usuario<input name="loginIdentifier" required minLength={3} maxLength={80} autoComplete="off" spellCheck={false} /></label>
-                  <label>Cargo<select name="jobTitle" defaultValue="waiter"><option value="waiter">Garzón</option><option value="bartender">Barman</option><option value="cashier">Cajera</option><option value="head_waiter">Jefe de garzones</option></select></label>
-                  <label>Porcentaje de experiencia<input name="tipPercentage" type="number" required min={1} max={100} step={1} inputMode="numeric" placeholder="Ej: 65" /><small>100% = 1,00 punto · 65% = 0,65 puntos</small></label>
-                  <label>Contraseña inicial<input name="password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" /></label>
-                  <button className="primary full" disabled={submitting}>{submitting ? "Guardando…" : "Crear cuenta"}</button>
-                  {accountMessage && <p className="form-message" role="status">{accountMessage}</p>}
-                </form>
-                <article className="panel stored-users"><div><span className="section-kicker">BASE DE DATOS</span><h3>Cuentas guardadas</h3></div>{auth.users.length === 0 ? <p>No hay cuentas visibles.</p> : <ul>{auth.users.map((user) => <li key={user.id}><span className="avatar tiny">{initials(user.displayName)}</span><div><strong>{user.displayName}</strong><small>@{user.loginIdentifier} · {jobTitles[user.jobTitle] ?? user.jobTitle}</small></div><span className="permission yes">Activa</span></li>)}</ul>}</article>
-              </div>
-            )}
-          </section>
-        )}
-
-        {view === "evaluaciones" && (
-          <section className="data-section">
-            <div className="section-heading"><div><p className="eyebrow">REGISTROS REALES</p><h2>Evaluaciones</h2><span>Esta sección permanecerá vacía hasta que exista un turno válido y una cuenta autenticada.</span></div></div>
-            <div className="empty-state" role="status"><span className="empty-icon">☆</span><h3>Aún no hay evaluaciones registradas</h3><p>No se muestran estrellas, promedios ni tendencias porque todavía no existen observaciones reales guardadas.</p><div className="empty-requirements"><span>Cuenta autenticada</span><span>Turno compartido</span><span>Período abierto</span></div></div>
-          </section>
-        )}
-
-        {view === "acuerdo" && (
-          <section className="data-section">
-            <div className="section-heading"><div><p className="eyebrow">TRABAJADORES REGISTRADOS</p><h2>Factores de propina</h2><span>Cada factor proviene del porcentaje guardado al crear la cuenta: 100% equivale a 1,00 punto.</span></div><span className="status complete">Total {formatExperienceFactor(totalFactorHundredths)}</span></div>
-            <div className="tip-simulator">
-              <div className="tip-simulator-head"><div><span className="section-kicker">CALCULADORA</span><h3>Distribución por factores</h3><p>Ingresa el fondo real del turno. El valor comienza en cero y no se guarda todavía.</p></div><label><span>Fondo común</span><div className="money-input"><b>$</b><input type="number" min="0" step="1" value={tipPoolPesos} onChange={(event) => setTipPoolPesos(Math.max(0, Math.trunc(Number(event.target.value) || 0)))} aria-label="Fondo común de propinas en pesos chilenos" /></div></label></div>
-              {realTeam.length === 0 ? <div className="calculator-empty">Agrega trabajadores antes de calcular una distribución.</div> : tipPoolPesos === 0 ? <div className="calculator-empty">Ingresa el monto real de propinas para calcular la distribución.</div> : <div className="tip-simulation-grid">{realTeam.map((member) => { const result = tipSimulation.find(({ participantId }) => participantId === member.id); return <article key={member.id}><span>{member.displayName}</span><strong>{clpFormatter.format(result?.amountPesos ?? 0)}</strong><small>Factor {formatExperienceFactor(member.tipFactorHundredths)}</small></article>; })}</div>}
-              {realTeam.length > 0 && <div className="formula-note"><strong>Fórmula:</strong> monto ÷ {formatExperienceFactor(totalFactorHundredths)} × factor individual. La calculadora distribuye cada peso mediante redondeo determinista.</div>}
-            </div>
-          </section>
-        )}
-      </section>
-    </main>
-  );
+  const isAdmin = auth.account.role === "admin";
+  return <main className="app-shell premium-app"><aside className="sidebar service-rail"><Brand /><div className="service-constellation" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <i key={index} />)}</div><nav aria-label="Navegación principal">{navigationForRole(auth.account.role).map((item) => <button key={item.id} className={currentView === item.id ? "active" : ""} onClick={() => { setView(item.id as AppView); if (item.id === "auditoria") void loadAudit(); }}><span>{item.icon}</span>{item.label}</button>)}</nav><div className="sidebar-note verified-note"><span>Datos reales</span><p>Las personas y factores provienen exclusivamente de D1.</p></div><div className="profile"><div className="avatar small">{initials(auth.account.displayName)}</div><div><strong>{auth.account.displayName}</strong><span>{isAdmin ? "Administrador" : "Trabajador"}</span></div><button className="logout-button" onClick={() => void logout()}>Salir</button></div></aside><section className="content service-desk"><div className="data-banner" role="status"><strong>Sesión real activa</strong><span>{auth.account.displayName} está conectado con permisos de {isAdmin ? "administración" : "trabajador"}.</span></div><header className="topbar"><div><p className="eyebrow">LIBRETA DE SERVICIO</p><h1>{isAdmin ? "Administración del equipo" : "Mi jornada"}</h1></div><span className="status complete">{isAdmin ? "Control privado" : "Acceso personal"}</span></header>{message && <div className="global-message" role="status">{message}<button onClick={() => setMessage("")} aria-label="Cerrar mensaje">×</button></div>}{currentView === "inicio" && (isAdmin ? <AdminHome onboarding={onboarding} team={auth.team} totalFactor={totalFactorHundredths} goTeam={() => setView("equipo")} /> : <WorkerHome account={auth.account} team={auth.team} />)}{isAdmin && currentView === "equipo" && <TeamAdmin users={auth.users} selectedUser={selectedUser} submitting={submitting} selectUser={setSelectedUserId} submitAdmin={submitAdmin} changeStatus={changeStatus} />}{isAdmin && currentView === "credenciales" && <CredentialsAdmin users={auth.users} submitting={submitting} submitAdmin={submitAdmin} />}{isAdmin && currentView === "auditoria" && <AuditTimeline events={auditEvents} loading={auditLoading} />}{!isAdmin && currentView === "evaluaciones" && <EmptyEvaluations />}{!isAdmin && currentView === "acuerdo" && <TipWorkspace team={activeTeam} totalFactor={totalFactorHundredths} pool={tipPoolPesos} setPool={setTipPoolPesos} simulation={tipSimulation} />}</section></main>;
 }
+
+function Brand() { return <div className="access-brand brand"><span className="brand-mark">☆</span><div><strong>Estrellas</strong><span>del Equipo</span></div></div>; }
+function SecretField({ name, label, autoComplete, show, toggle, autoFocus = false }: { name: string; label: string; autoComplete: string; show: boolean; toggle(): void; autoFocus?: boolean }) { return <label>{label}<div className="secret-input"><input name={name} type={show ? "text" : "password"} required minLength={name === "accessKey" ? 20 : 12} maxLength={name === "accessKey" ? 200 : 128} autoComplete={autoComplete} autoFocus={autoFocus} /><button type="button" onClick={toggle} aria-label={show ? `Ocultar ${label.toLowerCase()}` : `Mostrar ${label.toLowerCase()}`}>{show ? "Ocultar" : "Ver"}</button></div></label>; }
+function FormHead({ step, title, text }: { step: string; title: string; text: string }) { return <div className="access-form-heading"><span className="form-emblem">✦</span><div><span className="section-kicker">{step}</span><h2>{title}</h2><p>{text}</p></div></div>; }
+function SubmitButton({ busy, label }: { busy: boolean; label: string }) { return <button className="access-submit" disabled={busy}><span>{busy ? "Guardando…" : label}</span><b>→</b></button>; }
+
+function AccessGate({ mode, setMode, message, submitting, showSecret, setShowSecret, submit, bootstrapAllowed }: { mode: AccessMode; setMode(mode: AccessMode): void; message: string; submitting: boolean; showSecret: boolean; setShowSecret(value: boolean): void; submit(event: FormEvent<HTMLFormElement>, path: string): Promise<void>; bootstrapAllowed: boolean }) {
+  const recovery = mode === "recovery-key" || mode === "recovery-password";
+  return <main className="access-shell premium-access"><div className="access-aurora" aria-hidden="true" /><div className="access-constellation" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <i key={index} />)}</div><header className="access-header"><Brand /><span>Acceso del equipo</span></header><section className="access-stage"><div className="access-intro"><span className="access-kicker">{bootstrapAllowed ? "Apertura protegida" : recovery ? "Recuperación protegida" : "Bienvenido de vuelta"}</span><h1>{bootstrapAllowed ? "Activa la administración una sola vez." : recovery ? "Recupera el control sin perder tus datos." : "Tu jornada empieza aquí."}</h1><p>{bootstrapAllowed ? "Valida la clave única y registra la única cuenta administradora." : recovery ? "La clave única autoriza un cambio durante 10 minutos y cerrará las sesiones anteriores." : "La administración ya está configurada. Entra con tu cuenta personal; el registro inicial permanece cerrado por seguridad."}</p><div className="access-trust"><span>Contraseña protegida</span><span>Sesión privada</span><span>Auditoría activa</span></div></div>
+    {mode === "setup-key" && <form className="access-form" onSubmit={(event) => void submit(event, "/api/auth/bootstrap/unlock")}><FormHead step="PASO 1 DE 2" title="Clave única de acceso" text="Solo la persona responsable puede abrir el registro inicial." /><SecretField name="accessKey" label="Clave única" autoComplete="one-time-code" show={showSecret} toggle={() => setShowSecret(!showSecret)} autoFocus /><SubmitButton busy={submitting} label="Validar y continuar" />{message && <p className="form-message" role="status">{message}</p>}</form>}
+    {mode === "setup-account" && <form className="access-form" onSubmit={(event) => void submit(event, "/api/auth/bootstrap")}><FormHead step="PASO 2 DE 2" title="Cuenta administradora" text="Al guardar, el registro inicial quedará cerrado." /><label>Nombre del restaurante<input name="organizationName" required minLength={2} maxLength={120} /></label><label>Tu nombre o alias<input name="displayName" required minLength={2} maxLength={100} /></label><label>Usuario<input name="loginIdentifier" required minLength={3} maxLength={80} autoComplete="username" /></label><SecretField name="password" label="Contraseña" autoComplete="new-password" show={showSecret} toggle={() => setShowSecret(!showSecret)} /><SubmitButton busy={submitting} label="Crear cuenta administradora" />{message && <p className="form-message" role="status">{message}</p>}</form>}
+    {mode === "login" && <form className="access-form" onSubmit={(event) => void submit(event, "/api/auth/login")}><FormHead step="ACCESO PERSONAL" title="Iniciar sesión" text="Usa el usuario asignado a tu cuenta." /><label>Usuario<input name="loginIdentifier" required autoComplete="username" autoFocus /></label><SecretField name="password" label="Contraseña" autoComplete="current-password" show={showSecret} toggle={() => setShowSecret(!showSecret)} /><SubmitButton busy={submitting} label="Entrar al sistema" /><button className="text-action" type="button" onClick={() => { setMode("recovery-key"); setShowSecret(false); }}>Recuperar acceso administrador</button>{message && <p className="form-message" role="status">{message}</p>}</form>}
+    {mode === "recovery-key" && <form className="access-form" onSubmit={(event) => void submit(event, "/api/auth/recovery/unlock")}><FormHead step="RECUPERACIÓN · PASO 1" title="Validar clave única" text="No se cambiará ninguna cuenta hasta completar el siguiente paso." /><SecretField name="accessKey" label="Clave única" autoComplete="one-time-code" show={showSecret} toggle={() => setShowSecret(!showSecret)} autoFocus /><SubmitButton busy={submitting} label="Autorizar recuperación" /><button className="text-action" type="button" onClick={() => setMode("login")}>Volver al inicio de sesión</button>{message && <p className="form-message" role="status">{message}</p>}</form>}
+    {mode === "recovery-password" && <form className="access-form" onSubmit={(event) => void submit(event, "/api/auth/recovery/complete")}><FormHead step="RECUPERACIÓN · PASO 2" title="Nueva contraseña" text="Indica el usuario administrador existente y reemplaza su contraseña." /><label>Usuario administrador<input name="loginIdentifier" required minLength={3} maxLength={80} autoComplete="username" autoFocus /></label><SecretField name="newPassword" label="Nueva contraseña" autoComplete="new-password" show={showSecret} toggle={() => setShowSecret(!showSecret)} /><SubmitButton busy={submitting} label="Cambiar contraseña y cerrar sesiones" />{message && <p className="form-message" role="status">{message}</p>}</form>}
+  </section><footer className="access-footer"><span>Uso interno del equipo</span><span>Sin identidades ni resultados inventados.</span></footer></main>;
+}
+
+function AdminHome({ onboarding, team, totalFactor, goTeam }: { onboarding: ReturnType<typeof onboardingForTeam>; team: TeamMember[]; totalFactor: number; goTeam(): void }) { const active = team.filter((member) => member.status === "active").length; return <><section className="hero admin-hero"><div className="hero-copy"><span className="pill brass">MESA DE CONTROL</span><h2>Un equipo real, una decisión responsable.</h2><p>Administra cuentas, factores y accesos sin mezclarte con las evaluaciones entre compañeros.</p><button className="primary" onClick={goTeam}>Gestionar equipo <span>→</span></button></div><article className="setup-card"><span className="section-kicker">INCORPORACIÓN</span><strong>{onboarding.created} de {onboarding.target} cuentas</strong><p>{onboarding.next}</p><div className="progress-track"><i style={{ width: `${Math.min(100, onboarding.created / onboarding.target * 100)}%` }} /></div></article></section><section className="metric-grid real-metrics"><Metric icon="♙" label="Registrados" value={String(team.length)} note="Registros de D1" /><Metric icon="✓" label="Activos" value={String(active)} note="Con acceso vigente" /><Metric icon="◎" label="Factor activo" value={formatExperienceFactor(totalFactor)} note="Puntos de experiencia" /><Metric icon="☆" label="Administrador evalúa" value="No" note="Separación acordada" /></section></>; }
+function WorkerHome({ account, team }: { account: Account; team: TeamMember[] }) { return <section className="hero worker-hero"><div className="hero-copy"><span className="pill brass">JORNADA PERSONAL</span><h2>Bienvenido, {account.displayName}.</h2><p>Tu cuenta identifica tus acciones. Las evaluaciones solo se habilitan cuando exista un período y un turno real compartido.</p></div><article className="setup-card"><span className="section-kicker">EQUIPO VISIBLE</span><strong>{team.filter((member) => member.status === "active").length} cuentas activas</strong><p>Los factores mostrados en Propinas provienen del acuerdo registrado por administración.</p></article></section>; }
+function Metric({ icon, label, value, note }: { icon: string; label: string; value: string; note: string }) { return <article><div className="metric-icon gold">{icon}</div><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div></article>; }
+
+function TeamAdmin({ users, selectedUser, submitting, selectUser, submitAdmin, changeStatus }: { users: StoredUser[]; selectedUser: StoredUser | null; submitting: boolean; selectUser(id: string | null): void; submitAdmin(event: FormEvent<HTMLFormElement>, path: string, method?: "POST" | "PATCH"): Promise<void>; changeStatus(user: StoredUser): Promise<void> }) { return <section className="data-section"><div className="section-heading"><div><p className="eyebrow">ADMINISTRACIÓN</p><h2>Equipo</h2><span>Crea y modifica únicamente cuentas reales.</span></div><span className="status complete">{users.length} registrados</span></div><div className="admin-workbench"><form className="panel account-form" onSubmit={(event) => void submitAdmin(event, "/api/admin/users")}><div><span className="section-kicker">NUEVA CUENTA</span><h3>Agregar trabajador</h3></div><WorkerFields /><label>Contraseña inicial<input name="password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" /></label><button className="primary full" disabled={submitting}>Crear cuenta</button></form>{selectedUser ? <form key={selectedUser.id} className="panel account-form" onSubmit={(event) => void submitAdmin(event, `/api/admin/users/${selectedUser.id}`, "PATCH")}><div><span className="section-kicker">EDICIÓN SEGURA</span><h3>{selectedUser.displayName}</h3></div><WorkerFields user={selectedUser} /><div className="form-actions"><button className="primary" disabled={submitting}>Guardar cambios</button><button className="secondary" type="button" onClick={() => selectUser(null)}>Cancelar</button></div></form> : <article className="panel empty-summary"><span className="section-kicker">EDICIÓN</span><h3>Selecciona una cuenta</h3><p>Podrás corregir nombre, usuario, cargo y factor. Cada cambio queda registrado.</p></article>}</div>{users.length === 0 ? <Empty title="Aún no has agregado trabajadores" text="Crea la primera cuenta con sus datos y credenciales reales." /> : <div className="worker-card-grid">{users.map((user) => <article className={`worker-card ${user.status !== "active" ? "is-suspended" : ""}`} key={user.id}><div className="worker-identity"><span className="avatar small">{initials(user.displayName)}</span><div><strong>{user.displayName}</strong><small>@{user.loginIdentifier} · {jobTitles[user.jobTitle]}</small></div></div><div className="worker-facts"><span>Factor <b>{formatExperienceFactor(user.tipFactorHundredths)}</b></span><span className={user.status === "active" ? "permission yes" : "permission no"}>{statusLabel(user.status)}</span></div><div className="worker-actions"><button className="secondary" onClick={() => selectUser(user.id)}>Editar</button><button className={user.status === "active" ? "danger-action" : "secondary"} disabled={submitting} onClick={() => void changeStatus(user)}>{user.status === "active" ? "Suspender" : "Reactivar"}</button></div></article>)}</div>}</section>; }
+function WorkerFields({ user }: { user?: StoredUser }) { return <><label>Nombre o alias<input name="displayName" required minLength={2} maxLength={100} defaultValue={user?.displayName} /></label><label>Usuario<input name="loginIdentifier" required minLength={3} maxLength={80} defaultValue={user?.loginIdentifier} autoComplete="off" /></label><label>Cargo<select name="jobTitle" defaultValue={user?.jobTitle ?? "waiter"}><option value="waiter">Garzón</option><option value="bartender">Barman</option><option value="cashier">Cajera</option><option value="head_waiter">Jefe de garzones</option></select></label><label>Porcentaje de experiencia<input name="tipPercentage" type="number" required min={1} max={100} step={1} defaultValue={user?.tipFactorHundredths} /><small>La cajera debe conservar 50% = 0,50 puntos.</small></label></>; }
+function CredentialsAdmin({ users, submitting, submitAdmin }: { users: StoredUser[]; submitting: boolean; submitAdmin(event: FormEvent<HTMLFormElement>, path: string): Promise<void> }) { return <section className="data-section"><div className="section-heading"><div><p className="eyebrow">ACCESOS PERSONALES</p><h2>Credenciales</h2><span>Reemplazar una contraseña cierra todas las sesiones de esa persona.</span></div></div>{users.length === 0 ? <Empty title="No hay credenciales de trabajadores" text="Primero crea una cuenta en Equipo." /> : <div className="credential-grid">{users.map((user) => <form className="panel credential-card" key={user.id} onSubmit={(event) => void submitAdmin(event, `/api/admin/users/${user.id}/password`)}><div className="worker-identity"><span className="avatar small">{initials(user.displayName)}</span><div><strong>{user.displayName}</strong><small>@{user.loginIdentifier}</small></div></div><label>Nueva contraseña<input name="newPassword" type="password" required minLength={12} maxLength={128} autoComplete="new-password" /></label><button className="primary full" disabled={submitting}>Restablecer contraseña</button></form>)}</div>}</section>; }
+function AuditTimeline({ events, loading }: { events: AuditEvent[]; loading: boolean }) { return <section className="data-section"><div className="section-heading"><div><p className="eyebrow">TRAZABILIDAD</p><h2>Auditoría administrativa</h2><span>Historial de cambios de cuentas y accesos, sin guardar secretos.</span></div><span className="status neutral">Últimos 50</span></div>{loading ? <div className="empty-state" aria-busy="true">Cargando historial…</div> : events.length === 0 ? <Empty title="Aún no hay acciones registradas" text="La primera creación o cambio de cuenta aparecerá aquí." /> : <ol className="audit-timeline">{events.map((event) => <li key={event.id}><span className="audit-dot">◎</span><div><strong>{auditLabels[event.action] ?? event.action}</strong><p>{event.actorDisplayName ? `${event.actorDisplayName} realizó esta acción.` : "Recuperación protegida realizada fuera de sesión."}</p><small>{new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Santiago" }).format(new Date(event.createdAt))}</small></div></li>)}</ol>}</section>; }
+function EmptyEvaluations() { return <section className="data-section"><div className="section-heading"><div><p className="eyebrow">REGISTROS REALES</p><h2>Evaluaciones</h2><span>Solo aparecerán evaluaciones vinculadas a un turno válido.</span></div></div><Empty title="Aún no hay evaluaciones registradas" text="No mostramos promedios, estrellas ni tendencias inventadas. Administración debe abrir un período y registrar turnos reales." /></section>; }
+function Empty({ title, text }: { title: string; text: string }) { return <div className="empty-state" role="status"><span className="empty-icon">☆</span><h3>{title}</h3><p>{text}</p></div>; }
+function TipWorkspace({ team, totalFactor, pool, setPool, simulation }: { team: TeamMember[]; totalFactor: number; pool: number; setPool(value: number): void; simulation: Array<{ participantId: string; amountPesos: number }> }) { return <section className="data-section"><div className="section-heading"><div><p className="eyebrow">ACUERDO REGISTRADO</p><h2>Factores de propina</h2><span>100% equivale a 1,00 punto de experiencia.</span></div><span className="status complete">Total {formatExperienceFactor(totalFactor)}</span></div><div className="tip-simulator"><div className="tip-simulator-head"><div><span className="section-kicker">CALCULADORA</span><h3>Distribución del fondo común</h3><p>El cálculo no modifica datos ni aplica sanciones automáticamente.</p></div><label><span>Fondo común</span><div className="money-input"><b>$</b><input type="number" min="0" step="1" value={pool} onChange={(event) => setPool(Math.max(0, Math.trunc(Number(event.target.value) || 0)))} aria-label="Fondo común de propinas en pesos chilenos" /></div></label></div>{team.length === 0 ? <div className="calculator-empty">No hay trabajadores activos para distribuir.</div> : pool === 0 ? <div className="calculator-empty">Ingresa el monto real de propinas.</div> : <div className="tip-simulation-grid">{team.map((member) => <article key={member.id}><span>{member.displayName}</span><strong>{clpFormatter.format(simulation.find(({ participantId }) => participantId === member.id)?.amountPesos ?? 0)}</strong><small>Factor {formatExperienceFactor(member.tipFactorHundredths)}</small></article>)}</div>}{team.length > 0 && <div className="formula-note"><strong>Fórmula:</strong> monto ÷ {formatExperienceFactor(totalFactor)} × factor individual.</div>}</div></section>; }

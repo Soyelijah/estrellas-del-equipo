@@ -92,7 +92,27 @@ test("status exposes bootstrap state but never password hashes or session tokens
     dependencies(),
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true, bootstrapAllowed: true, setupUnlocked: false, account: null, users: [] });
+  assert.deepEqual(await response.json(), { ok: true, bootstrapAllowed: true, setupUnlocked: false, recoveryUnlocked: false, account: null, users: [], team: [] });
+});
+
+test("exposes a sanitized team to workers without administrative login identifiers", async () => {
+  const team = [{ id: "u1", displayName: "Garzón", loginIdentifier: "garzon.privado", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }];
+  const response = await handleAdminAuthRequest(new Request("https://equipo.example/api/auth/status", { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository: {
+    async findSessionActor() { return { userId: "u1", displayName: "Garzón", role: "worker", organizationId: "o1", membershipId: "m1" }; },
+    async listOrganizationUsers() { return team; },
+  } }));
+  const body = await response.json();
+  assert.deepEqual(body.users, []);
+  assert.deepEqual(body.team, [{ id: "u1", displayName: "Garzón", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }]);
+  assert.equal(JSON.stringify(body).includes("garzon.privado"), false);
+});
+
+test("reports a valid scoped recovery grant only after administrator setup is closed", async () => {
+  const response = await handleAdminAuthRequest(new Request("https://equipo.example/api/auth/status", { headers: { cookie: "estrellas_recovery=signed-recovery-grant" } }), dependencies({
+    repository: { async getBootstrapState() { return { allowed: false, organizationId: null }; } },
+    verifyRecoveryGrant: async () => true,
+  }));
+  assert.equal((await response.json()).recoveryUnlocked, true);
 });
 
 test("unlocks administrator registration with the unique key for ten minutes", async () => {

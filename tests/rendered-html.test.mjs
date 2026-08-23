@@ -26,6 +26,11 @@ test("renders only the access boundary before authentication", async () => {
     response.headers.get("content-type") ?? "",
     /^text\/html\b/i,
   );
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+  assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  assert.equal(response.headers.get("strict-transport-security"), null);
   const html = await response.text();
   assert.doesNotMatch(html, /codex-preview/);
   assert.match(html, /Preparando el acceso/);

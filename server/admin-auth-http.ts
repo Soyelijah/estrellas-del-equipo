@@ -93,13 +93,25 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         actorFor(request, dependencies),
       ]);
       const setupUnlocked = bootstrap.allowed && await dependencies.verifySetupGrant(cookieValue(request, SETUP_COOKIE_NAME));
-      const users = actor?.role === "admin" ? await dependencies.repository.listOrganizationUsers(actor.organizationId) : [];
+      const recoveryUnlocked = !bootstrap.allowed && await dependencies.verifyRecoveryGrant(cookieValue(request, RECOVERY_COOKIE_NAME));
+      const organizationUsers = actor ? await dependencies.repository.listOrganizationUsers(actor.organizationId) as Array<Record<string, unknown>> : [];
+      const users = actor?.role === "admin" ? organizationUsers : [];
+      const team = organizationUsers.map((member) => ({
+        id: member.id,
+        displayName: member.displayName,
+        status: member.status,
+        role: member.role,
+        jobTitle: member.jobTitle,
+        tipFactorHundredths: member.tipFactorHundredths,
+      }));
       return json({
         ok: true,
         bootstrapAllowed: bootstrap.allowed,
         setupUnlocked,
+        recoveryUnlocked,
         account: actor ? { displayName: actor.displayName, role: actor.role } : null,
         users,
+        team,
       });
     }
 

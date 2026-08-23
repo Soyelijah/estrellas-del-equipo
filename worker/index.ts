@@ -32,8 +32,33 @@ interface ExecutionContext {
 // dangerouslyAllowSVG: true in next.config.js and uncomment below:
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
-const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+function withSecurityHeaders(request: Request, response: Response): Response {
+  const secured = new Response(response.body, response);
+  secured.headers.set("content-security-policy", [
+    "default-src 'self'",
+    "base-uri 'none'",
+    "connect-src 'self'",
+    "font-src 'self' data:",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data: blob:",
+    "object-src 'none'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+  ].join("; "));
+  secured.headers.set("permissions-policy", "camera=(), geolocation=(), microphone=()");
+  secured.headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  secured.headers.set("x-content-type-options", "nosniff");
+  secured.headers.set("x-frame-options", "DENY");
+
+  if (new URL(request.url).protocol === "https:") {
+    secured.headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
+  }
+
+  return secured;
+}
+
+async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/_vinext/image") {
@@ -90,6 +115,11 @@ const worker = {
     }
 
     return handler.fetch(request, env, ctx);
+}
+
+const worker = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return withSecurityHeaders(request, await routeRequest(request, env, ctx));
   },
 };
 
