@@ -14,7 +14,7 @@ function foundationMigrationPaths() {
 
   return upFiles.map((upName) => ({
     up: new URL(upName, drizzleDirectory),
-    down: new URL(upName.replace(/\.sql$/, ".down.sql"), drizzleDirectory),
+    down: new URL(upName.replace(/\.sql$/, ".sql.rollback"), drizzleDirectory),
   }));
 }
 
