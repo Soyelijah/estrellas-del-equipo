@@ -17,8 +17,8 @@ test("uses an accessible five-star control instead of a score select", () => {
 test("explains the monthly cycle and the daily shift before asking for data", () => {
   assert.match(page, /Qué es el ciclo vigente/);
   assert.match(page, /Qué registra este paso diario/);
-  assert.match(page, /No es una evaluación/);
-  assert.match(page, /Las estrellas aparecerán/);
+  assert.match(page, /No es una\s+evaluación/);
+  assert.match(page, /mediante estrellas/);
 });
 
 test("does not present six accounts as a maximum or completion target", () => {
@@ -36,4 +36,12 @@ test("hides worker result cards until a real evaluation exists", () => {
   assert.match(page, /result\.completedSubmissions > 0/);
   assert.match(page, /evaluatedResults\.length > 0/);
   assert.match(page, /evaluatedResults\.map/);
+});
+
+test("registers one general shift without asking for an area", () => {
+  assert.doesNotMatch(page, /name="section"/);
+  assert.match(page, /section: "Turno general"/);
+  assert.match(page, /defaultChecked/);
+  assert.match(page, /Personas que trabajaron juntas/);
+  assert.match(page, /Desmarca solamente a quien/);
 });

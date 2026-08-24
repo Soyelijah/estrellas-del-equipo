@@ -532,7 +532,7 @@ export default function Home() {
         "/api/admin/evaluation-shifts",
         "POST",
         {
-          section: data.get("section"),
+          section: "Turno general",
           startsAt,
           endsAt,
           membershipIds: data.getAll("membershipIds"),
@@ -1801,24 +1801,14 @@ function AdminOperations({
                 <div>
                   <strong>Qué registra este paso diario</strong>
                   <p>
-                    Indica quiénes trabajaron juntos, en qué área y durante qué
-                    horario. No es una evaluación: solo habilita a los compañeros
-                    correctos. Las estrellas aparecerán después en la cuenta
-                    personal de cada trabajador.
+                    Indica quiénes trabajaron juntos y durante qué horario. Cada
+                    persona seleccionada podrá evaluar a todos sus compañeros
+                    evaluables de ese turno mediante estrellas. No es una
+                    evaluación: solo habilita los formularios correctos.
                   </p>
                 </div>
               </div>
             </div>
-            <label>
-              Área o sección
-              <input
-                name="section"
-                required
-                minLength={2}
-                maxLength={80}
-                placeholder="Ej.: Salón principal"
-              />
-            </label>
             <div className="form-split">
               <label>
                 Inicio
@@ -1830,13 +1820,14 @@ function AdminOperations({
               </label>
             </div>
             <fieldset className="member-selector">
-              <legend>Personas del turno</legend>
+              <legend>Personas que trabajaron juntas</legend>
               {members.map((member) => (
                 <label key={member.membershipId}>
                   <input
                     type="checkbox"
                     name="membershipIds"
                     value={member.membershipId}
+                    defaultChecked
                   />
                   <span>
                     <b>{member.displayName}</b>
@@ -1850,8 +1841,12 @@ function AdminOperations({
                 </label>
               ))}
             </fieldset>
+            <small className="form-hint">
+              Todos están seleccionados inicialmente. Desmarca solamente a quien
+              no haya trabajado ese turno.
+            </small>
             <button className="primary full" disabled={submitting}>
-              Registrar turno y habilitar estrellas
+              Registrar turno y habilitar evaluaciones
             </button>
           </form>
         )}
