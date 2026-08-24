@@ -37,4 +37,4 @@
 
 ## Estado de publicación
 
-La versión anterior está publicada en `https://equipo.zgamersa.com/`. La versión mensual descrita arriba queda lista para publicación después de superar la verificación completa indicada en la tarea 7.
+La versión mensual está publicada en `https://equipo.zgamersa.com/`. El dominio personalizado y la URL de Sites sirven el mismo artefacto; la API real responde con D1, las mutaciones sin sesión se rechazan y la migración 0008 está aplicada.

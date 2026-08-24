@@ -111,4 +111,4 @@
 - [x] Add an administrator-only audited monthly close that blocks later evaluations.
 - [x] Enforce the period start/end boundary server-side.
 - [x] Run the complete test, lint, migration, security, artifact, and live smoke gates.
-- [ ] Commit, push, save, deploy, and verify the exact release at `equipo.zgamersa.com`.
+- [x] Commit, push, save, deploy, and verify the exact release at `equipo.zgamersa.com`.
