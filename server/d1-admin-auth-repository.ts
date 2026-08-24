@@ -518,6 +518,71 @@ export class D1AdminAuthRepository {
     return { updated: true as const };
   }
 
+  async deleteEvaluationCycle(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, string>;
+    const period = await this.database.prepare(`
+      SELECT id, policy_version_id AS policyId, name
+      FROM evaluation_periods
+      WHERE id = ? AND organization_id = ? AND status IN ('open', 'under_review')
+      LIMIT 1
+    `).bind(record.periodId, record.organizationId).first<{ id: string; policyId: string; name: string }>();
+    if (!period) return { deleted: false as const };
+
+    await this.database.batch([
+      this.database.prepare(`
+        DELETE FROM review_requests
+        WHERE organization_id = ? AND (
+          (object_type = 'evaluation_period' AND object_id = ?)
+          OR (object_type = 'result_snapshot' AND object_id IN (
+            SELECT id FROM result_snapshots WHERE period_id = ?
+          ))
+        )
+      `).bind(record.organizationId, period.id, period.id),
+      this.database.prepare("DELETE FROM integrity_alerts WHERE organization_id = ? AND period_id = ?")
+        .bind(record.organizationId, period.id),
+      this.database.prepare("DELETE FROM result_snapshots WHERE organization_id = ? AND period_id = ?")
+        .bind(record.organizationId, period.id),
+      this.database.prepare(`
+        DELETE FROM rating_observations
+        WHERE submission_id IN (
+          SELECT id FROM evaluation_submissions WHERE organization_id = ? AND period_id = ?
+        )
+      `).bind(record.organizationId, period.id),
+      this.database.prepare("DELETE FROM evaluation_submissions WHERE organization_id = ? AND period_id = ?")
+        .bind(record.organizationId, period.id),
+      this.database.prepare(`
+        DELETE FROM shift_assignments
+        WHERE shift_id IN (
+          SELECT id FROM shifts WHERE organization_id = ? AND period_id = ?
+        )
+      `).bind(record.organizationId, period.id),
+      this.database.prepare("DELETE FROM shifts WHERE organization_id = ? AND period_id = ?")
+        .bind(record.organizationId, period.id),
+      this.database.prepare("DELETE FROM evaluation_participations WHERE period_id = ?")
+        .bind(period.id),
+      this.database.prepare("DELETE FROM evaluation_periods WHERE id = ? AND organization_id = ?")
+        .bind(period.id, record.organizationId),
+      this.database.prepare(`
+        DELETE FROM policy_versions
+        WHERE id = ? AND organization_id = ?
+          AND NOT EXISTS (SELECT 1 FROM evaluation_periods WHERE policy_version_id = ?)
+      `).bind(period.policyId, record.organizationId, period.policyId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, reason, metadata_json, created_at)
+        VALUES (?, ?, ?, 'evaluation.cycle_deleted', 'evaluation_period', ?, ?, ?, ?)
+      `).bind(
+        record.auditId,
+        record.organizationId,
+        record.actorMembershipId,
+        period.id,
+        record.reason,
+        JSON.stringify({ deletedCycleName: period.name, policyVersionId: period.policyId }),
+        record.now,
+      ),
+    ]);
+    return { deleted: true as const };
+  }
+
   async listAuditEvents(organizationId: string, limit: number) {
     const boundedLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
     const rows = await this.database.prepare(`

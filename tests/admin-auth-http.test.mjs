@@ -32,6 +32,7 @@ function dependencies(overrides = {}) {
       async openEvaluationCycle() { return { created: true }; },
       async createEvaluationShift() { return { created: true }; },
       async closeEvaluationCycle() { return { updated: true }; },
+      async deleteEvaluationCycle() { return { deleted: true }; },
       ...repositoryOverrides,
     },
     createId: (() => { let id = 0; return () => `id-${++id}`; })(),
@@ -257,4 +258,35 @@ test("opens an evaluation cycle and registers a completed shared shift", async (
   assert.deepEqual(calls[1].record.membershipIds, ["m-worker-1", "m-worker-2"]);
   assert.equal(calls[2].type, "close");
   assert.deepEqual({ ...calls[2].record, auditId: "bounded-generated-id" }, { periodId: "period-1", organizationId: "o1", actorMembershipId: "m-admin", auditId: "bounded-generated-id", reason: "Cierre mensual revisado", now: "2026-08-22T12:00:00.000Z" });
+});
+
+test("permanently deletes only a confirmed legacy cycle through an administrator session", async () => {
+  const periodId = "4a9627e4-0d7e-4cf0-abac-61a617cb5126";
+  const calls = [];
+  const actor = { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" };
+  const repository = {
+    async findSessionActor() { return actor; },
+    async deleteEvaluationCycle(record) { calls.push(record); return { deleted: true }; },
+  };
+  const headers = { cookie: "estrellas_session=private-cookie-token" };
+  const valid = await handleAdminAuthRequest(mutation(`/api/admin/evaluation-cycles/${periodId}`, {
+    confirmation: "CONFIRMO ELIMINAR CICLO ANTIGUO",
+    reason: "Reemplazo autorizado por el ciclo mensual oficial",
+  }, headers, "DELETE"), dependencies({ repository }));
+  const invalid = await handleAdminAuthRequest(mutation(`/api/admin/evaluation-cycles/${periodId}`, {
+    confirmation: "eliminar",
+    reason: "Reemplazo autorizado por el ciclo mensual oficial",
+  }, headers, "DELETE"), dependencies({ repository }));
+
+  assert.deepEqual([valid.status, invalid.status], [200, 422]);
+  assert.deepEqual(await invalid.json(), { ok: false, error: "invalid_cycle_delete" });
+  assert.equal(calls.length, 1);
+  assert.deepEqual({ ...calls[0], auditId: "bounded-generated-id" }, {
+    periodId,
+    organizationId: "o1",
+    actorMembershipId: "m-admin",
+    auditId: "bounded-generated-id",
+    reason: "Reemplazo autorizado por el ciclo mensual oficial",
+    now: "2026-08-22T12:00:00.000Z",
+  });
 });

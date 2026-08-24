@@ -4,7 +4,10 @@ type EvaluationAdminRepository = {
   openEvaluationCycle(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
   createEvaluationShift(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
   closeEvaluationCycle(record: Record<string, unknown>): Promise<{ updated: boolean }>;
+  deleteEvaluationCycle(record: Record<string, unknown>): Promise<{ deleted: boolean }>;
 };
+
+const LEGACY_DELETE_CONFIRMATION = "CONFIRMO ELIMINAR CICLO ANTIGUO";
 
 const DEFAULT_CRITERIA = [
   { code: "discipline", name: "Disciplina, puntualidad y presentación", description: "Llega a tiempo, cumple horarios, mantiene uniforme y presentación adecuados, respeta normas y permanece preparado durante el turno.", category: "discipline", weightBasisPoints: 1667 },
@@ -105,6 +108,30 @@ export async function closeEvaluationCycle(
     : { ok: false as const, status: 404 as const, error: "evaluation_cycle_not_found" };
 }
 
+export async function deleteEvaluationCyclePermanently(
+  input: unknown,
+  actor: SessionActor,
+  dependencies: { repository: EvaluationAdminRepository; createId: () => string; now: string; periodId: string },
+) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403 as const, error: "admin_required" };
+  if (!isRecord(input)) return { ok: false as const, status: 422 as const, error: "invalid_cycle_delete" };
+  const confirmation = typeof input.confirmation === "string" ? input.confirmation.trim() : "";
+  const reason = boundedText(input.reason, 8, 240);
+  if (!uuidText(dependencies.periodId) || confirmation !== LEGACY_DELETE_CONFIRMATION || !reason) {
+    return { ok: false as const, status: 422 as const, error: "invalid_cycle_delete" };
+  }
+  const result = await dependencies.repository.deleteEvaluationCycle({
+    periodId: dependencies.periodId,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    auditId: dependencies.createId(),
+    reason,
+    now: dependencies.now,
+  });
+  if (!result.deleted) return { ok: false as const, status: 404 as const, error: "evaluation_cycle_not_found" };
+  return { ok: true as const, status: 200 as const };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -113,6 +140,10 @@ function boundedText(value: unknown, minimum: number, maximum: number) {
   if (typeof value !== "string") return null;
   const normalized = value.trim().replace(/\s+/gu, " ");
   return normalized.length >= minimum && normalized.length <= maximum ? normalized : null;
+}
+
+function uuidText(value: unknown) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function isoDate(value: unknown) {

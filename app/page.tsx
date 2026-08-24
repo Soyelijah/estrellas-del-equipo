@@ -150,6 +150,7 @@ const auditLabels: Record<string, string> = {
   "admin.password_recovered": "Acceso administrador recuperado",
   "evaluation.cycle_opened": "Ciclo de evaluación abierto",
   "evaluation.cycle_closed": "Mes de evaluación cerrado",
+  "evaluation.cycle_deleted": "Ciclo de evaluación eliminado",
   "evaluation.shift_recorded": "Turno compartido registrado",
 };
 function initials(label: string) {
@@ -238,7 +239,7 @@ export default function Home() {
 
   async function requestJson(
     path: string,
-    method: "POST" | "PATCH",
+    method: "POST" | "PATCH" | "DELETE",
     body: Record<string, unknown>,
   ) {
     const response = await fetch(path, {
@@ -279,6 +280,8 @@ export default function Home() {
       invalid_shift_members:
         "El turno contiene una cuenta inactiva o no autorizada.",
       invalid_cycle_close: "Escribe un motivo claro antes de cerrar el mes.",
+      invalid_cycle_delete:
+        "Escribe la confirmación exacta y un motivo claro para eliminar el ciclo.",
       evaluation_cycle_not_found:
         "El mes ya estaba cerrado o no está disponible.",
       insufficient_observation:
@@ -479,6 +482,39 @@ export default function Home() {
       await loadOperations();
     } catch {
       setMessage("No se pudo cerrar el mes.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function submitCycleDelete(
+    event: FormEvent<HTMLFormElement>,
+    periodId: string,
+  ) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    try {
+      const { response, result } = await requestJson(
+        `/api/admin/evaluation-cycles/${periodId}`,
+        "DELETE",
+        {
+          confirmation: data.get("confirmation"),
+          reason: data.get("reason"),
+        },
+      );
+      if (!response.ok) {
+        setMessage(friendlyError(result.error));
+        return;
+      }
+      form.reset();
+      setMessage(
+        "Ciclo antiguo eliminado. Las cuentas, credenciales y porcentajes permanecen intactos.",
+      );
+      await loadOperations();
+    } catch {
+      setMessage("No se pudo eliminar el ciclo antiguo.");
     } finally {
       setSubmitting(false);
     }
@@ -741,6 +777,7 @@ export default function Home() {
             submitCycle={submitCycle}
             submitShift={submitShift}
             submitCycleClose={submitCycleClose}
+            submitCycleDelete={submitCycleDelete}
           />
         )}
         {isAdmin && currentView === "credenciales" && (
@@ -1591,6 +1628,7 @@ function AdminOperations({
   submitCycle,
   submitShift,
   submitCycleClose,
+  submitCycleDelete,
 }: {
   operations: EvaluationOperations | null;
   loading: boolean;
@@ -1598,6 +1636,10 @@ function AdminOperations({
   submitCycle(event: FormEvent<HTMLFormElement>): Promise<void>;
   submitShift(event: FormEvent<HTMLFormElement>): Promise<void>;
   submitCycleClose(
+    event: FormEvent<HTMLFormElement>,
+    periodId: string,
+  ): Promise<void>;
+  submitCycleDelete(
     event: FormEvent<HTMLFormElement>,
     periodId: string,
   ): Promise<void>;
@@ -1842,6 +1884,47 @@ function AdminOperations({
           </label>
           <button className="secondary" disabled={submitting}>
             Cerrar mes para revisión
+          </button>
+        </form>
+      )}
+      {operations?.period?.status === "open" && (
+        <form
+          className="cycle-close-panel cycle-delete-panel"
+          onSubmit={(event) =>
+            void submitCycleDelete(event, operations.period!.id)
+          }
+        >
+          <div>
+            <span className="section-kicker">ZONA DE CONTROL</span>
+            <h3>Eliminar definitivamente este ciclo</h3>
+            <p>
+              Borra sus turnos, evaluaciones y criterios. No elimina personas,
+              accesos ni factores de propina. La acción queda registrada.
+            </p>
+          </div>
+          <div className="cycle-delete-fields">
+            <label>
+              Confirmación exacta
+              <input
+                name="confirmation"
+                required
+                autoComplete="off"
+                placeholder="CONFIRMO ELIMINAR CICLO ANTIGUO"
+              />
+            </label>
+            <label>
+              Motivo
+              <input
+                name="reason"
+                required
+                minLength={8}
+                maxLength={240}
+                placeholder="Ej.: Reemplazo por el ciclo oficial"
+              />
+            </label>
+          </div>
+          <button className="danger-action" disabled={submitting}>
+            Eliminar ciclo antiguo
           </button>
         </form>
       )}

@@ -25,3 +25,9 @@ test("does not present six accounts as a maximum or completion target", () => {
   assert.doesNotMatch(page, /de \{onboarding\.target\} cuentas/);
   assert.doesNotMatch(page, /onboarding\.created \/ onboarding\.target/);
 });
+
+test("makes permanent cycle removal explicit and preserves account expectations", () => {
+  assert.match(page, /CONFIRMO ELIMINAR CICLO ANTIGUO/);
+  assert.match(page, /No elimina personas/);
+  assert.match(page, /La acción queda registrada/);
+});

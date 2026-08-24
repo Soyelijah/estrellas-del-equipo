@@ -287,6 +287,17 @@ test("opens a real cycle, records a shared shift, and applies the cashier partic
   assert.deepEqual({ ...database.prepare("SELECT action, reason FROM audit_events WHERE id = 'audit-close'").get() }, { action: "evaluation.cycle_closed", reason: "Cierre mensual revisado" });
   assert.equal((await evaluationRepository.loadWorkspace({ userId: "worker-cashier", membershipId: "membership-cashier", organizationId: "org-1", role: "worker" }, "2026-08-23T03:00:00.000Z")).period, null);
 
+  assert.deepEqual(await repository.deleteEvaluationCycle({
+    periodId: "period-real", organizationId: "org-1", actorMembershipId: "membership-admin",
+    auditId: "audit-delete", reason: "Reemplazo autorizado por el ciclo mensual oficial", now: "2026-09-24T00:05:00.000Z",
+  }), { deleted: true });
+  for (const table of ["evaluation_periods", "evaluation_participations", "shifts", "shift_assignments", "evaluation_submissions", "rating_observations", "criteria", "policy_versions"]) {
+    assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0, `${table} should be empty`);
+  }
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM users").get().count, 3);
+  assert.deepEqual(database.prepare("SELECT tip_factor_hundredths FROM memberships WHERE id = 'membership-cashier'").get().tip_factor_hundredths, 50);
+  assert.deepEqual({ ...database.prepare("SELECT action, reason FROM audit_events WHERE id = 'audit-delete'").get() }, { action: "evaluation.cycle_deleted", reason: "Reemplazo autorizado por el ciclo mensual oficial" });
+
 });
 
 test("loads the active membership bound to the authenticated subject", async () => {

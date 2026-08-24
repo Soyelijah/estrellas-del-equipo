@@ -1,5 +1,5 @@
 import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from "./admin-auth-service.ts";
-import { closeEvaluationCycle, openEvaluationCycle, registerEvaluationShift } from "./evaluation-admin-service.ts";
+import { closeEvaluationCycle, deleteEvaluationCyclePermanently, openEvaluationCycle, registerEvaluationShift } from "./evaluation-admin-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
 const COOKIE_NAME = "estrellas_session";
@@ -26,6 +26,7 @@ type AuthDependencies = {
     openEvaluationCycle(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
     createEvaluationShift(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
     closeEvaluationCycle(record: Record<string, unknown>): Promise<{ updated: boolean }>;
+    deleteEvaluationCycle(record: Record<string, unknown>): Promise<{ deleted: boolean }>;
   };
   createId(): string;
   createToken(): string;
@@ -140,7 +141,7 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       return json({ ok: true, operations: await dependencies.repository.getEvaluationOperations(actor.organizationId) });
     }
 
-    if (request.method !== "POST" && request.method !== "PATCH") return json({ ok: false, error: "method_not_allowed" }, 405, { allow: "GET, POST, PATCH" });
+    if (request.method !== "POST" && request.method !== "PATCH" && request.method !== "DELETE") return json({ ok: false, error: "method_not_allowed" }, 405, { allow: "GET, POST, PATCH, DELETE" });
     if (!isSameOriginMutation(request)) return json({ ok: false, error: "cross_origin_request" }, 403);
     const parsed = await readBody(request);
     if (!parsed.ok) return parsed.response;
@@ -177,6 +178,19 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         createId: dependencies.createId,
         now: serviceDependencies.now,
         periodId: closeCycleMatch[1],
+      });
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
+    }
+
+    const deleteCycleMatch = path.match(/^\/api\/admin\/evaluation-cycles\/([^/]+)$/);
+    if (request.method === "DELETE" && deleteCycleMatch) {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const result = await deleteEvaluationCyclePermanently(parsed.body, actor, {
+        repository: dependencies.repository,
+        createId: dependencies.createId,
+        now: serviceDependencies.now,
+        periodId: deleteCycleMatch[1],
       });
       return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
     }
