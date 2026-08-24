@@ -1884,6 +1884,9 @@ function AdminOperations({
     periodId: string,
   ): Promise<void>;
 }) {
+  const [operationSection, setOperationSection] = useState<
+    "cycle" | "shifts" | "history"
+  >("cycle");
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -1929,8 +1932,40 @@ function AdminOperations({
           </small>
         </div>
       </div>
+      <nav className="operation-sections" aria-label="Categorías de evaluaciones">
+        <button
+          type="button"
+          className={operationSection === "cycle" ? "active" : ""}
+          aria-pressed={operationSection === "cycle"}
+          onClick={() => setOperationSection("cycle")}
+        >
+          <span>01</span>
+          <strong>Ciclo y resultados</strong>
+          <small>Mes vigente, criterios y cierre</small>
+        </button>
+        <button
+          type="button"
+          className={operationSection === "shifts" ? "active" : ""}
+          aria-pressed={operationSection === "shifts"}
+          onClick={() => setOperationSection("shifts")}
+        >
+          <span>02</span>
+          <strong>Turnos diarios</strong>
+          <small>{operations?.shifts.length ?? 0} turnos registrados</small>
+        </button>
+        <button
+          type="button"
+          className={operationSection === "history" ? "active" : ""}
+          aria-pressed={operationSection === "history"}
+          onClick={() => setOperationSection("history")}
+        >
+          <span>03</span>
+          <strong>Historial</strong>
+          <small>{operations?.submissions.length ?? 0} evaluaciones</small>
+        </button>
+      </nav>
       <div className="operations-grid">
-        {operations?.period?.status === "open" ? (
+        {operationSection === "cycle" && (operations?.period?.status === "open" ? (
           <article className="panel cycle-card">
             <div className="panel-head">
               <div>
@@ -2046,8 +2081,8 @@ function AdminOperations({
               </small>
             )}
           </form>
-        )}
-        {operations?.period?.status === "open" && (
+        ))}
+        {operationSection === "shifts" && operations?.period?.status === "open" && (
           <form
             className="panel operations-form shift-form"
             onSubmit={(event) => void submitShift(event)}
@@ -2124,8 +2159,16 @@ function AdminOperations({
           </form>
         )}
       </div>
-      <MonthlyEvaluationSummary summary={operations?.summary ?? null} />
-      {operations?.period?.status === "open" && (
+      {operationSection === "shifts" && operations?.period?.status !== "open" && (
+        <Empty
+          title="Primero abre un ciclo mensual"
+          text="Cuando el ciclo esté abierto podrás registrar aquí cada turno real y habilitar las evaluaciones correspondientes."
+        />
+      )}
+      {operationSection === "cycle" && (
+        <MonthlyEvaluationSummary summary={operations?.summary ?? null} />
+      )}
+      {operationSection === "cycle" && operations?.period?.status === "open" && (
         <form
           className="cycle-close-panel"
           onSubmit={(event) =>
@@ -2155,7 +2198,7 @@ function AdminOperations({
           </button>
         </form>
       )}
-      {operations?.period?.status === "open" && (
+      {operationSection === "cycle" && operations?.period?.status === "open" && (
         <form
           className="cycle-close-panel cycle-delete-panel"
           onSubmit={(event) =>
@@ -2196,6 +2239,7 @@ function AdminOperations({
           </button>
         </form>
       )}
+      {operationSection === "history" && (
       <section className="history-control">
         <div className="section-heading">
           <div>
@@ -2264,6 +2308,8 @@ function AdminOperations({
           </div>
         )}
       </section>
+      )}
+      {operationSection === "shifts" && (
       <section className="shift-ledger">
         <div className="section-heading">
           <div>
@@ -2320,6 +2366,7 @@ function AdminOperations({
           </div>
         )}
       </section>
+      )}
     </section>
   );
 }

@@ -103,3 +103,11 @@ test("keeps a slow login from remaining indefinitely in a generic saving state",
   assert.match(page, /El servidor está tardando más de lo habitual/);
   assert.match(page, /El acceso tardó demasiado/);
 });
+
+test("separates the long administrator evaluation page into focused categories", () => {
+  assert.match(page, /className="operation-sections"/);
+  assert.match(page, /operationSection === "cycle"/);
+  assert.match(page, /operationSection === "shifts"/);
+  assert.match(page, /operationSection === "history"/);
+  assert.match(page, /aria-pressed=/);
+});
