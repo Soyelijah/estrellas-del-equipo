@@ -65,7 +65,7 @@ Reglas del cálculo:
 
 ## Modelo de competencias para el equipo inicial
 
-El sistema inicial tiene 7 participantes del reparto: 1 jefe de garzones, 1 barman, 4 garzones y 1 cajera. Solo 5 son sujetos de evaluación: barman y cuatro garzones. La cajera puede evaluar, pero conserva un factor fijo y no es evaluada; el jefe administra y queda fuera de la evaluación entre compañeros.
+El sistema inicial tiene 7 participantes del reparto: 1 jefe de garzones, 1 barman, 4 garzones y 1 cajera. Solo 5 son sujetos de evaluación: barman y cuatro garzones. La cajera y el jefe de garzones pueden evaluar, pero no son evaluados; la cuenta administradora queda fuera de la evaluación entre compañeros.
 
 ### Núcleo común
 

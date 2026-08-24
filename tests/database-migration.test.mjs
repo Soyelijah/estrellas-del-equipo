@@ -191,3 +191,52 @@ test("rating observations preserve explicit no-observation answers without scori
     /CHECK constraint failed: rating_observations_response_check/,
   );
 });
+
+test("head waiter policy migration preserves evaluations while making the role non-evaluable", () => {
+  const migrationPaths = foundationMigrationPaths();
+  const policyMigration = migrationPaths.find(({ up }) => up.pathname.endsWith("0009_head_waiter_evaluation_policy.sql"));
+  assert.ok(policyMigration);
+
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON");
+  for (const paths of migrationPaths) {
+    if (paths !== policyMigration) database.exec(readFileSync(paths.up, "utf8"));
+  }
+  database.exec(`
+    INSERT INTO organizations (id, name, timezone, status) VALUES ('org-policy', 'Restaurante', 'America/Santiago', 'active');
+    INSERT INTO users (id, login_identifier, display_name, status) VALUES
+      ('admin-policy', 'admin.policy', 'Administrador', 'active'),
+      ('head-policy', 'jefe.policy', 'Jefe de garzones', 'active'),
+      ('cashier-policy', 'cajera.policy', 'Cajera', 'active');
+    INSERT INTO memberships (id, organization_id, user_id, role, job_title, starts_at) VALUES
+      ('membership-admin-policy', 'org-policy', 'admin-policy', 'admin', 'head_waiter', '2026-08-01'),
+      ('membership-head-policy', 'org-policy', 'head-policy', 'worker', 'head_waiter', '2026-08-01'),
+      ('membership-cashier-policy', 'org-policy', 'cashier-policy', 'worker', 'cashier', '2026-08-01');
+    INSERT INTO policy_versions (id, organization_id, version, effective_from, status, minimum_raters, minimum_shifts, created_by_membership_id)
+      VALUES ('policy-role', 'org-policy', 1, '2026-08-01', 'active', 2, 1, 'membership-admin-policy');
+    INSERT INTO evaluation_periods (id, organization_id, policy_version_id, name, starts_at, ends_at, status)
+      VALUES ('period-role', 'org-policy', 'policy-role', 'Agosto', '2026-08-01', '2026-08-31', 'open');
+    INSERT INTO evaluation_participations (id, period_id, membership_id, can_evaluate, can_be_evaluated, exclusion_reason) VALUES
+      ('participation-head-policy', 'period-role', 'membership-head-policy', 1, 1, NULL),
+      ('participation-cashier-policy', 'period-role', 'membership-cashier-policy', 1, 0, 'fixed_tip_share');
+  `);
+
+  database.exec(readFileSync(policyMigration.up, "utf8"));
+  assert.deepEqual({ ...database.prepare("SELECT can_evaluate, can_be_evaluated, exclusion_reason FROM evaluation_participations WHERE id = 'participation-head-policy'").get() }, {
+    can_evaluate: 1,
+    can_be_evaluated: 0,
+    exclusion_reason: "head_waiter_excluded",
+  });
+  assert.deepEqual({ ...database.prepare("SELECT can_evaluate, can_be_evaluated, exclusion_reason FROM evaluation_participations WHERE id = 'participation-cashier-policy'").get() }, {
+    can_evaluate: 1,
+    can_be_evaluated: 0,
+    exclusion_reason: "fixed_tip_share",
+  });
+
+  database.exec(readFileSync(policyMigration.down, "utf8"));
+  assert.deepEqual({ ...database.prepare("SELECT can_evaluate, can_be_evaluated, exclusion_reason FROM evaluation_participations WHERE id = 'participation-head-policy'").get() }, {
+    can_evaluate: 1,
+    can_be_evaluated: 1,
+    exclusion_reason: null,
+  });
+});

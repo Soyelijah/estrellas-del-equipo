@@ -32,6 +32,12 @@ function roundScore(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function evaluationParticipation(jobTitle: string) {
+  if (jobTitle === "cashier") return { canBeEvaluated: 0, exclusionReason: "fixed_tip_share" };
+  if (jobTitle === "head_waiter") return { canBeEvaluated: 0, exclusionReason: "head_waiter_excluded" };
+  return { canBeEvaluated: 1, exclusionReason: null };
+}
+
 export class D1AdminAuthRepository {
   private readonly database: D1DatabaseLike;
 
@@ -110,6 +116,7 @@ export class D1AdminAuthRepository {
 
   async createManagedUser(rawRecord: Record<string, unknown>) {
     const record = rawRecord as unknown as ManagedUserRecord;
+    const participation = evaluationParticipation(record.user.jobTitle);
     try {
       await this.database.batch([
         this.database.prepare(`
@@ -130,8 +137,8 @@ export class D1AdminAuthRepository {
         `).bind(
           crypto.randomUUID(),
           record.membership.id,
-          record.user.jobTitle === "cashier" ? 0 : 1,
-          record.user.jobTitle === "cashier" ? "fixed_tip_share" : null,
+          participation.canBeEvaluated,
+          participation.exclusionReason,
           record.membership.joinedAt,
           record.membership.joinedAt,
           record.membership.organizationId,
@@ -173,12 +180,22 @@ export class D1AdminAuthRepository {
   async updateManagedUser(rawRecord: Record<string, unknown>) {
     const record = rawRecord as Record<string, string | number>;
     if (!await this.managedTarget(String(record.userId), String(record.organizationId))) return { updated: false as const, conflict: false as const };
+    const participation = evaluationParticipation(String(record.jobTitle));
     try {
       await this.database.batch([
         this.database.prepare("UPDATE users SET display_name = ?, login_identifier = ?, updated_at = ? WHERE id = ?")
           .bind(record.displayName, record.loginIdentifier, record.now, record.userId),
         this.database.prepare("UPDATE memberships SET job_title = ?, tip_factor_hundredths = ?, updated_at = ? WHERE user_id = ? AND organization_id = ? AND role <> 'admin'")
           .bind(record.jobTitle, record.tipFactorHundredths, record.now, record.userId, record.organizationId),
+        this.database.prepare(`
+          UPDATE evaluation_participations
+          SET can_be_evaluated = ?, exclusion_reason = ?, updated_at = ?
+          WHERE membership_id IN (
+            SELECT id FROM memberships WHERE user_id = ? AND organization_id = ? AND role <> 'admin'
+          ) AND period_id IN (
+            SELECT id FROM evaluation_periods WHERE organization_id = ? AND status = 'open'
+          )
+        `).bind(participation.canBeEvaluated, participation.exclusionReason, record.now, record.userId, record.organizationId, record.organizationId),
         this.database.prepare(`
           INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
           VALUES (?, ?, ?, 'user.updated', 'user', ?, ?, ?)
@@ -261,7 +278,7 @@ export class D1AdminAuthRepository {
       this.database.prepare(`
         SELECT m.id AS membershipId, u.display_name AS displayName, m.job_title AS jobTitle, u.status,
           CASE WHEN u.status = 'active' THEN 1 ELSE 0 END AS canEvaluate,
-          CASE WHEN u.status = 'active' AND m.job_title <> 'cashier' THEN 1 ELSE 0 END AS canBeEvaluated
+          CASE WHEN u.status = 'active' AND m.job_title NOT IN ('cashier', 'head_waiter') THEN 1 ELSE 0 END AS canBeEvaluated
         FROM memberships m
         JOIN users u ON u.id = m.user_id
         WHERE m.organization_id = ? AND m.role <> 'admin' AND m.deleted_at IS NULL AND u.deleted_at IS NULL
@@ -491,18 +508,21 @@ export class D1AdminAuthRepository {
         INSERT INTO evaluation_periods (id, organization_id, policy_version_id, name, starts_at, ends_at, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, 'open', ?)
       `).bind(record.periodId, record.organizationId, record.policyId, record.name, record.startsAt, record.endsAt, record.now),
-      ...members.results.map((member) => this.database.prepare(`
+      ...members.results.map((member) => {
+        const participation = evaluationParticipation(member.job_title);
+        return this.database.prepare(`
         INSERT INTO evaluation_participations (id, period_id, membership_id, can_evaluate, can_be_evaluated, exclusion_reason, created_at, updated_at)
         VALUES (?, ?, ?, 1, ?, ?, ?, ?)
       `).bind(
         crypto.randomUUID(),
         record.periodId,
         member.id,
-        member.job_title === "cashier" ? 0 : 1,
-        member.job_title === "cashier" ? "fixed_tip_share" : null,
+        participation.canBeEvaluated,
+        participation.exclusionReason,
         record.now,
         record.now,
-      )),
+      );
+      }),
       this.database.prepare(`
         INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
         VALUES (?, ?, ?, 'evaluation.cycle_opened', 'evaluation_period', ?, ?, ?)
@@ -543,6 +563,19 @@ export class D1AdminAuthRepository {
     if (members.results.length !== record.membershipIds.length) return { created: false as const, reason: "invalid_shift_members" };
 
     await this.database.batch([
+      this.database.prepare(`
+        UPDATE evaluation_participations
+        SET can_be_evaluated = 0,
+          exclusion_reason = CASE
+            WHEN membership_id IN (SELECT id FROM memberships WHERE job_title = 'cashier') THEN 'fixed_tip_share'
+            ELSE 'head_waiter_excluded'
+          END,
+          updated_at = ?
+        WHERE period_id = ? AND membership_id IN (
+          SELECT id FROM memberships
+          WHERE organization_id = ? AND role <> 'admin' AND job_title IN ('cashier', 'head_waiter')
+        )
+      `).bind(record.now, period.id, record.organizationId),
       this.database.prepare(`
         INSERT INTO shifts (id, organization_id, period_id, starts_at, ends_at, section, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, 'closed', ?)

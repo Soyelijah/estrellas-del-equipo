@@ -1814,8 +1814,8 @@ function AdminOperations({
               </div>
             </div>
             <p>
-              Los trabajadores activos participan. La cajera puede evaluar, pero
-              conserva su acuerdo de no ser evaluada.
+              Los trabajadores activos participan. El jefe de garzones y la cajera
+              pueden evaluar, pero no son evaluados por sus compañeros.
             </p>
             <div className="official-criteria">
               <div className="official-criteria-head">
@@ -1954,7 +1954,7 @@ function AdminOperations({
                       {jobTitles[member.jobTitle]}
                       {member.canBeEvaluated
                         ? " · evalúa y es evaluado/a"
-                        : " · evalúa, no es evaluada"}
+                        : " · evalúa, no es evaluado/a"}
                     </small>
                   </span>
                 </label>
@@ -2350,7 +2350,7 @@ function EvaluationDesk({
       {workspace.assignments.length === 0 ? (
         <Empty
           title="Estás al día"
-          text="No tienes compañeros pendientes en turnos compartidos. La cajera no aparece como persona evaluable por el acuerdo vigente."
+          text="No tienes compañeros pendientes en turnos compartidos. El jefe de garzones y la cajera no aparecen como personas evaluables por el acuerdo vigente."
         />
       ) : (
         <div className="evaluation-stack">

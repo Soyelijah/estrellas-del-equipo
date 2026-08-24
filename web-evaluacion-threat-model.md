@@ -12,7 +12,7 @@ El mayor riesgo no es técnico sino de integridad: una cuenta comprometida, un r
 - Exposición: aplicación web alojada en Sites y accesible por Internet solo a usuarios autorizados.
 - Se asume un local y una organización durante la primera versión.
 - Existe un acuerdo de 4,65 puntos de experiencia: 1,00/1,00/0,65/0,50/0,25/0,75/0,50.
-- El jefe no evalúa ni es evaluado; la cajera evalúa, no es evaluada y conserva un factor fijo de 0,50 puntos.
+- La cuenta administradora no evalúa ni es evaluada; el jefe de garzones y la cajera pueden evaluar, pero no son evaluados. La cajera conserva un factor fijo de 0,50 puntos.
 - Fuera de alcance actual: POS, asistencia, cocina, pagos, nómina y despliegue productivo de D1.
 
 Preguntas residuales:

@@ -11,9 +11,9 @@ Este documento registra el punto de control previo al modelo de amenazas definit
 - Las evaluaciones comenzarán con uso real; el usuario no acepta un piloto puramente simulado.
 - Las recompensas estarán limitadas al alcance del jefe y se relacionan con las propinas del equipo.
 - Existe un acuerdo de 4,65 puntos de experiencia: jefe 1,00; garzones 1,00/0,65/0,50/0,25; barman 0,75 y cajera 0,50.
-- El jefe administra y no evalúa ni es evaluado.
-- La cajera evalúa a barman y garzones, pero no es evaluada y mantiene un factor fijo de 0,50 puntos.
-- Los sujetos evaluados son el barman y los cuatro garzones; los evaluadores son esas cinco personas más la cajera.
+- La cuenta administradora no evalúa ni es evaluada.
+- El jefe de garzones y la cajera evalúan a barman y garzones, pero no son evaluados; la cajera mantiene un factor fijo de 0,50 puntos.
+- Los sujetos evaluados son el barman y los cuatro garzones; los evaluadores son esas cinco personas más el jefe de garzones y la cajera.
 - El desempeño incluye conocimiento de tragos, vinos y comidas; explicación al cliente; exactitud de comandas; servicio y trabajo en equipo.
 
 ## Suposiciones residuales

@@ -38,6 +38,9 @@ test("explains the monthly cycle and the daily shift before asking for data", ()
   assert.match(page, /MATRIZ OFICIAL/);
   assert.match(page, /6 criterios · misma importancia/);
   assert.match(page, /operations\.criteria\.map/);
+  assert.match(page, /El jefe de garzones y la cajera/);
+  assert.match(page, /no son evaluados por sus compañeros/);
+  assert.match(page, /evalúa, no es evaluado\/a/);
 });
 
 test("does not present six accounts as a maximum or completion target", () => {

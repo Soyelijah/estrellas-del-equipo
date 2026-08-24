@@ -329,6 +329,67 @@ test("opens a real cycle, records a shared shift, and applies the cashier partic
 
 });
 
+test("enforces the administrator, head waiter, waiter, and cashier evaluation matrix", async () => {
+  const { database, repository } = createEmptyAdminFixture();
+  await repository.saveBootstrap({
+    organization: { id: "org-matrix", name: "Restaurante", createdAt: "2026-08-24T12:00:00.000Z" },
+    user: { id: "admin-matrix", authSubject: "local:admin-matrix", displayName: "Administrador", loginIdentifier: "administrador", passwordHash: "admin-hash", status: "active", createdAt: "2026-08-24T12:00:00.000Z" },
+    membership: { id: "membership-admin-matrix", organizationId: "org-matrix", userId: "admin-matrix", role: "admin", joinedAt: "2026-08-24T12:00:00.000Z" },
+    guard: { key: "administrator_bootstrap", createdAt: "2026-08-24T12:00:00.000Z" },
+  });
+
+  for (const worker of [
+    { id: "head-matrix", membershipId: "membership-head-matrix", displayName: "Jefe de garzones", login: "jefe.garzones", jobTitle: "head_waiter", factor: 100 },
+    { id: "waiter-matrix", membershipId: "membership-waiter-matrix", displayName: "Garzón", login: "garzon.real", jobTitle: "waiter", factor: 65 },
+    { id: "cashier-matrix", membershipId: "membership-cashier-matrix", displayName: "Cajera", login: "cajera.real", jobTitle: "cashier", factor: 50 },
+  ]) {
+    await repository.createManagedUser({
+      user: { id: worker.id, authSubject: `local:${worker.id}`, displayName: worker.displayName, loginIdentifier: worker.login, passwordHash: "worker-hash", jobTitle: worker.jobTitle, status: "active", createdAt: "2026-08-24T12:10:00.000Z" },
+      membership: { id: worker.membershipId, organizationId: "org-matrix", userId: worker.id, role: "worker", joinedAt: "2026-08-24T12:10:00.000Z", createdByMembershipId: "membership-admin-matrix", tipFactorHundredths: worker.factor },
+    });
+  }
+
+  assert.deepEqual(await repository.openEvaluationCycle({
+    organizationId: "org-matrix", createdByMembershipId: "membership-admin-matrix", policyId: "policy-matrix", periodId: "period-matrix", auditId: "audit-cycle-matrix", name: "Agosto 2026", startsAt: "2026-08-01T04:00:00.000Z", endsAt: "2026-09-01T03:59:59.000Z", now: "2026-08-24T12:20:00.000Z",
+    criteria: [
+      { id: "criterion-matrix", code: "teamwork", name: "Trabajo en equipo", description: "Colabora con el salón", category: "teamwork", weightBasisPoints: 10000 },
+    ],
+  }), { created: true });
+
+  assert.deepEqual(await repository.createEvaluationShift({
+    id: "shift-matrix", auditId: "audit-shift-matrix", organizationId: "org-matrix", createdByMembershipId: "membership-admin-matrix", section: "Salón", startsAt: "2026-08-24T18:00:00.000Z", endsAt: "2026-08-25T02:00:00.000Z", membershipIds: ["membership-head-matrix", "membership-waiter-matrix", "membership-cashier-matrix"], now: "2026-08-25T02:05:00.000Z",
+  }), { created: true });
+
+  const participations = database.prepare(`
+    SELECT membership_id, can_evaluate, can_be_evaluated, exclusion_reason
+    FROM evaluation_participations ORDER BY membership_id
+  `).all().map((row) => ({ ...row }));
+  assert.deepEqual(participations, [
+    { membership_id: "membership-cashier-matrix", can_evaluate: 1, can_be_evaluated: 0, exclusion_reason: "fixed_tip_share" },
+    { membership_id: "membership-head-matrix", can_evaluate: 1, can_be_evaluated: 0, exclusion_reason: "head_waiter_excluded" },
+    { membership_id: "membership-waiter-matrix", can_evaluate: 1, can_be_evaluated: 1, exclusion_reason: null },
+  ]);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM evaluation_participations WHERE membership_id = 'membership-admin-matrix'").get().count, 0);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM shift_assignments WHERE shift_id = 'shift-matrix'").get().count, 3);
+
+  const evaluationRepository = new D1EvaluationRepository(new SQLiteD1Database(database));
+  const [headWorkspace, waiterWorkspace, cashierWorkspace] = await Promise.all([
+    evaluationRepository.loadWorkspace({ userId: "head-matrix", membershipId: "membership-head-matrix", organizationId: "org-matrix", role: "worker" }, "2026-08-25T02:10:00.000Z"),
+    evaluationRepository.loadWorkspace({ userId: "waiter-matrix", membershipId: "membership-waiter-matrix", organizationId: "org-matrix", role: "worker" }, "2026-08-25T02:10:00.000Z"),
+    evaluationRepository.loadWorkspace({ userId: "cashier-matrix", membershipId: "membership-cashier-matrix", organizationId: "org-matrix", role: "worker" }, "2026-08-25T02:10:00.000Z"),
+  ]);
+  assert.deepEqual(headWorkspace.assignments.map((assignment) => assignment.subjectDisplayName), ["Garzón"]);
+  assert.deepEqual(cashierWorkspace.assignments.map((assignment) => assignment.subjectDisplayName), ["Garzón"]);
+  assert.deepEqual(waiterWorkspace.assignments, []);
+
+  const operations = await repository.getEvaluationOperations("org-matrix");
+  assert.deepEqual(operations.members.map(({ displayName, canEvaluate, canBeEvaluated }) => ({ displayName, canEvaluate, canBeEvaluated })), [
+    { displayName: "Cajera", canEvaluate: true, canBeEvaluated: false },
+    { displayName: "Garzón", canEvaluate: true, canBeEvaluated: true },
+    { displayName: "Jefe de garzones", canEvaluate: true, canBeEvaluated: false },
+  ]);
+});
+
 test("loads the active membership bound to the authenticated subject", async () => {
   const { repository } = createFixture();
 
