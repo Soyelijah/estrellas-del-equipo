@@ -161,6 +161,7 @@ const auditLabels: Record<string, string> = {
   "evaluation.cycle_closed": "Mes de evaluación cerrado",
   "evaluation.cycle_deleted": "Ciclo de evaluación eliminado",
   "evaluation.shift_recorded": "Turno compartido registrado",
+  "evaluation.shift_deleted": "Turno eliminado",
 };
 function initials(label: string) {
   return label
@@ -289,6 +290,10 @@ export default function Home() {
         "Un turno diario debe durar más de 0 y como máximo 18 horas.",
       shift_outside_cycle:
         "La fecha del turno debe estar dentro del ciclo mensual vigente.",
+      invalid_shift_delete: "Escribe un motivo claro para eliminar el turno.",
+      shift_has_evaluations:
+        "Este turno ya tiene evaluaciones y no puede eliminarse directamente.",
+      evaluation_shift_not_found: "El turno ya no está disponible.",
       evaluation_cycle_required: "Primero abre un ciclo de evaluación.",
       invalid_shift_members:
         "El turno contiene una cuenta inactiva o no autorizada.",
@@ -578,6 +583,33 @@ export default function Home() {
       setSubmitting(false);
     }
   }
+  async function submitShiftDelete(
+    event: FormEvent<HTMLFormElement>,
+    shiftId: string,
+  ) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    try {
+      const { response, result } = await requestJson(
+        `/api/admin/evaluation-shifts/${shiftId}`,
+        "DELETE",
+        { reason: data.get("reason") },
+      );
+      if (!response.ok) {
+        setMessage(friendlyError(result.error));
+        return;
+      }
+      setMessage("Turno eliminado. Las cuentas y el ciclo permanecen intactos.");
+      await loadOperations();
+    } catch {
+      setMessage("No se pudo eliminar el turno.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
   async function submitEvaluation(
     event: FormEvent<HTMLFormElement>,
     assignment: EvaluationWorkspace["assignments"][number],
@@ -803,6 +835,7 @@ export default function Home() {
             submitting={submitting}
             submitCycle={submitCycle}
             submitShift={submitShift}
+            submitShiftDelete={submitShiftDelete}
             submitCycleClose={submitCycleClose}
             submitCycleDelete={submitCycleDelete}
           />
@@ -1654,6 +1687,7 @@ function AdminOperations({
   submitting,
   submitCycle,
   submitShift,
+  submitShiftDelete,
   submitCycleClose,
   submitCycleDelete,
 }: {
@@ -1662,6 +1696,10 @@ function AdminOperations({
   submitting: boolean;
   submitCycle(event: FormEvent<HTMLFormElement>): Promise<void>;
   submitShift(event: FormEvent<HTMLFormElement>): Promise<void>;
+  submitShiftDelete(
+    event: FormEvent<HTMLFormElement>,
+    shiftId: string,
+  ): Promise<void>;
   submitCycleClose(
     event: FormEvent<HTMLFormElement>,
     periodId: string,
@@ -2008,7 +2046,26 @@ function AdminOperations({
                     {formatServiceTime(shift.endsAt)}
                   </p>
                 </div>
-                <b>{shift.memberCount} personas</b>
+                <div className="shift-actions">
+                  <b>{shift.memberCount} personas</b>
+                  <form
+                    onSubmit={(event) =>
+                      void submitShiftDelete(event, shift.id)
+                    }
+                  >
+                    <input
+                      name="reason"
+                      required
+                      minLength={8}
+                      maxLength={240}
+                      defaultValue="Turno registrado con fechas incorrectas"
+                      aria-label={`Motivo para eliminar el turno del ${formatServiceDate(shift.startsAt)}`}
+                    />
+                    <button className="danger-action" disabled={submitting}>
+                      Eliminar turno
+                    </button>
+                  </form>
+                </div>
               </article>
             ))}
           </div>

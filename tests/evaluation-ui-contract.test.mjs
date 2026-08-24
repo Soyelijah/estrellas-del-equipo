@@ -68,4 +68,7 @@ test("registers one general shift without asking for an area", () => {
   assert.match(page, /name="endTime"/);
   assert.doesNotMatch(page, /type="datetime-local"/);
   assert.match(page, /reconocerá automáticamente el día siguiente/);
+  assert.match(page, /submitShiftDelete/);
+  assert.match(page, /Eliminar turno/);
+  assert.match(page, /Turno registrado con fechas incorrectas/);
 });

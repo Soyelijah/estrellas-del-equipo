@@ -31,6 +31,7 @@ function dependencies(overrides = {}) {
       async getEvaluationOperations() { return { period: null, shifts: [], members: [] }; },
       async openEvaluationCycle() { return { created: true }; },
       async createEvaluationShift() { return { created: true }; },
+      async deleteEvaluationShift() { return { deleted: true }; },
       async closeEvaluationCycle() { return { updated: true }; },
       async deleteEvaluationCycle() { return { deleted: true }; },
       ...repositoryOverrides,
@@ -276,6 +277,32 @@ test("rejects a multi-day record because evaluations require a real daily shift"
   assert.equal(response.status, 422);
   assert.deepEqual(await response.json(), { ok: false, error: "invalid_shift_duration" });
   assert.equal(shiftWrites, 0);
+});
+
+test("deletes only an empty shift through an administrator session", async () => {
+  const shiftId = "0be8173f-c068-478e-84cc-dc7f2ac3161e";
+  const calls = [];
+  const repository = {
+    async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" }; },
+    async deleteEvaluationShift(record) { calls.push(record); return { deleted: true }; },
+  };
+  const response = await handleAdminAuthRequest(mutation(
+    `/api/admin/evaluation-shifts/${shiftId}`,
+    { reason: "Turno registrado con fechas incorrectas" },
+    { cookie: "estrellas_session=private-cookie-token" },
+    "DELETE",
+  ), dependencies({ repository }));
+
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.deepEqual({ ...calls[0], auditId: "bounded-generated-id" }, {
+    shiftId,
+    organizationId: "o1",
+    actorMembershipId: "m-admin",
+    auditId: "bounded-generated-id",
+    reason: "Turno registrado con fechas incorrectas",
+    now: "2026-08-22T12:00:00.000Z",
+  });
 });
 
 test("permanently deletes only a confirmed legacy cycle through an administrator session", async () => {

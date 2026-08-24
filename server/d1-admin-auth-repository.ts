@@ -559,6 +559,51 @@ export class D1AdminAuthRepository {
     return { created: true as const };
   }
 
+  async deleteEvaluationShift(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, string>;
+    const shift = await this.database.prepare(`
+      SELECT s.id, s.starts_at AS startsAt, s.ends_at AS endsAt, s.section,
+        COUNT(DISTINCT sa.id) AS memberCount,
+        COUNT(DISTINCT es.id) AS submissionCount
+      FROM shifts s
+      JOIN evaluation_periods ep ON ep.id = s.period_id AND ep.status = 'open'
+      LEFT JOIN shift_assignments sa ON sa.shift_id = s.id
+      LEFT JOIN evaluation_submissions es ON es.shift_id = s.id AND es.status <> 'voided'
+      WHERE s.id = ? AND s.organization_id = ?
+      GROUP BY s.id
+      LIMIT 1
+    `).bind(record.shiftId, record.organizationId).first<{
+      id: string;
+      startsAt: string;
+      endsAt: string;
+      section: string;
+      memberCount: number;
+      submissionCount: number;
+    }>();
+    if (!shift) return { deleted: false as const, reason: "evaluation_shift_not_found" };
+    if (Number(shift.submissionCount) > 0) return { deleted: false as const, reason: "shift_has_evaluations" };
+
+    await this.database.batch([
+      this.database.prepare("DELETE FROM shift_assignments WHERE shift_id = ?")
+        .bind(shift.id),
+      this.database.prepare("DELETE FROM shifts WHERE id = ? AND organization_id = ?")
+        .bind(shift.id, record.organizationId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, reason, metadata_json, created_at)
+        VALUES (?, ?, ?, 'evaluation.shift_deleted', 'shift', ?, ?, ?, ?)
+      `).bind(
+        record.auditId,
+        record.organizationId,
+        record.actorMembershipId,
+        shift.id,
+        record.reason,
+        JSON.stringify({ section: shift.section, startsAt: shift.startsAt, endsAt: shift.endsAt, memberCount: Number(shift.memberCount) }),
+        record.now,
+      ),
+    ]);
+    return { deleted: true as const };
+  }
+
   async closeEvaluationCycle(rawRecord: Record<string, unknown>) {
     const record = rawRecord as Record<string, string>;
     const period = await this.database.prepare(`

@@ -1,5 +1,5 @@
 import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from "./admin-auth-service.ts";
-import { closeEvaluationCycle, deleteEvaluationCyclePermanently, openEvaluationCycle, registerEvaluationShift } from "./evaluation-admin-service.ts";
+import { closeEvaluationCycle, deleteEvaluationCyclePermanently, deleteEvaluationShift, openEvaluationCycle, registerEvaluationShift } from "./evaluation-admin-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
 const COOKIE_NAME = "estrellas_session";
@@ -25,6 +25,7 @@ type AuthDependencies = {
     getEvaluationOperations(organizationId: string): Promise<unknown>;
     openEvaluationCycle(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
     createEvaluationShift(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
+    deleteEvaluationShift(record: Record<string, unknown>): Promise<{ deleted: true } | { deleted: false; reason: string }>;
     closeEvaluationCycle(record: Record<string, unknown>): Promise<{ updated: boolean }>;
     deleteEvaluationCycle(record: Record<string, unknown>): Promise<{ deleted: boolean }>;
   };
@@ -165,6 +166,19 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         repository: dependencies.repository,
         createId: dependencies.createId,
         now: serviceDependencies.now,
+      });
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
+    }
+
+    const deleteShiftMatch = path.match(/^\/api\/admin\/evaluation-shifts\/([^/]+)$/);
+    if (request.method === "DELETE" && deleteShiftMatch) {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const result = await deleteEvaluationShift(parsed.body, actor, {
+        repository: dependencies.repository,
+        createId: dependencies.createId,
+        now: serviceDependencies.now,
+        shiftId: deleteShiftMatch[1],
       });
       return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
     }

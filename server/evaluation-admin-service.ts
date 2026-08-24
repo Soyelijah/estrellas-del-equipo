@@ -3,6 +3,7 @@ import type { SessionActor } from "./admin-auth-service.ts";
 type EvaluationAdminRepository = {
   openEvaluationCycle(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
   createEvaluationShift(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
+  deleteEvaluationShift(record: Record<string, unknown>): Promise<{ deleted: true } | { deleted: false; reason: string }>;
   closeEvaluationCycle(record: Record<string, unknown>): Promise<{ updated: boolean }>;
   deleteEvaluationCycle(record: Record<string, unknown>): Promise<{ deleted: boolean }>;
 };
@@ -49,6 +50,36 @@ export async function openEvaluationCycle(
     return { ok: false as const, status, error: result.reason };
   }
   return { ok: true as const, status: 201 as const };
+}
+
+export async function deleteEvaluationShift(
+  input: unknown,
+  actor: SessionActor,
+  dependencies: {
+    repository: EvaluationAdminRepository;
+    createId: () => string;
+    now: string;
+    shiftId: string;
+  },
+) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403 as const, error: "admin_required" };
+  const shiftId = uuidText(dependencies.shiftId) ? dependencies.shiftId : null;
+  const reason = isRecord(input) ? boundedText(input.reason, 8, 240) : null;
+  if (!shiftId || !reason) return { ok: false as const, status: 422 as const, error: "invalid_shift_delete" };
+  const result = await dependencies.repository.deleteEvaluationShift({
+    shiftId,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    auditId: dependencies.createId(),
+    reason,
+    now: dependencies.now,
+  });
+  if (!result.deleted) {
+    return result.reason === "shift_has_evaluations"
+      ? { ok: false as const, status: 409 as const, error: result.reason }
+      : { ok: false as const, status: 404 as const, error: result.reason };
+  }
+  return { ok: true as const, status: 200 as const };
 }
 
 export async function registerEvaluationShift(

@@ -295,6 +295,19 @@ test("opens a real cycle, records a shared shift, and applies the cashier partic
     }],
   });
 
+  assert.deepEqual(await repository.deleteEvaluationShift({
+    shiftId: "shift-real", organizationId: "org-1", actorMembershipId: "membership-admin",
+    auditId: "audit-protected-shift", reason: "No debe eliminar evaluaciones", now: "2026-08-24T03:30:00.000Z",
+  }), { deleted: false, reason: "shift_has_evaluations" });
+
+  assert.deepEqual(await repository.deleteEvaluationShift({
+    shiftId: "shift-missing", organizationId: "org-1", actorMembershipId: "membership-admin",
+    auditId: "audit-shift-delete", reason: "Turno registrado con fechas incorrectas", now: "2026-08-24T04:00:00.000Z",
+  }), { deleted: true });
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM shifts").get().count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM shift_assignments WHERE shift_id = 'shift-missing'").get().count, 0);
+  assert.deepEqual({ ...database.prepare("SELECT action, reason FROM audit_events WHERE id = 'audit-shift-delete'").get() }, { action: "evaluation.shift_deleted", reason: "Turno registrado con fechas incorrectas" });
+
   assert.deepEqual(await repository.closeEvaluationCycle({
     periodId: "period-real", organizationId: "org-1", actorMembershipId: "membership-admin",
     auditId: "audit-close", reason: "Cierre mensual revisado", now: "2026-09-24T00:00:00.000Z",
