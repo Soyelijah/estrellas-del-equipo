@@ -118,6 +118,11 @@ type EvaluationWorkspace = {
     subjectJobTitle: JobTitle;
   }>;
 };
+type ShiftConfirmation = {
+  startsAt: string;
+  endsAt: string;
+  participantNames: string[];
+};
 type AuthState = {
   loading: boolean;
   bootstrapAllowed: boolean;
@@ -195,6 +200,8 @@ export default function Home() {
   );
   const [workspace, setWorkspace] = useState<EvaluationWorkspace | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [shiftConfirmation, setShiftConfirmation] =
+    useState<ShiftConfirmation | null>(null);
 
   function applyAuth(data: Omit<AuthState, "loading" | "unavailable">) {
     setAuth({ ...data, loading: false, unavailable: false });
@@ -545,6 +552,7 @@ export default function Home() {
     event.preventDefault();
     setSubmitting(true);
     setMessage("");
+    setShiftConfirmation(null);
     const form = event.currentTarget;
     const data = new FormData(form);
     try {
@@ -574,6 +582,19 @@ export default function Home() {
       setMessage(
         "Turno registrado. Los compañeros ya pueden evaluarse desde sus cuentas.",
       );
+      const selectedMembershipIds = new Set(
+        data.getAll("membershipIds").map(String),
+      );
+      setShiftConfirmation({
+        startsAt,
+        endsAt,
+        participantNames:
+          operations?.members
+            .filter((member) =>
+              selectedMembershipIds.has(member.membershipId),
+            )
+            .map((member) => member.displayName) ?? [],
+      });
       await loadOperations();
     } catch {
       setMessage(
@@ -836,6 +857,8 @@ export default function Home() {
             submitCycle={submitCycle}
             submitShift={submitShift}
             submitShiftDelete={submitShiftDelete}
+            shiftConfirmation={shiftConfirmation}
+            dismissShiftConfirmation={() => setShiftConfirmation(null)}
             submitCycleClose={submitCycleClose}
             submitCycleDelete={submitCycleDelete}
           />
@@ -1688,6 +1711,8 @@ function AdminOperations({
   submitCycle,
   submitShift,
   submitShiftDelete,
+  shiftConfirmation,
+  dismissShiftConfirmation,
   submitCycleClose,
   submitCycleDelete,
 }: {
@@ -1700,6 +1725,8 @@ function AdminOperations({
     event: FormEvent<HTMLFormElement>,
     shiftId: string,
   ): Promise<void>;
+  shiftConfirmation: ShiftConfirmation | null;
+  dismissShiftConfirmation(): void;
   submitCycleClose(
     event: FormEvent<HTMLFormElement>,
     periodId: string,
@@ -1940,6 +1967,12 @@ function AdminOperations({
             <button className="primary full" disabled={submitting}>
               Registrar turno y habilitar evaluaciones
             </button>
+            {shiftConfirmation && (
+              <ShiftRegistrationConfirmation
+                confirmation={shiftConfirmation}
+                onDismiss={dismissShiftConfirmation}
+              />
+            )}
           </form>
         )}
       </div>
@@ -2071,6 +2104,46 @@ function AdminOperations({
           </div>
         )}
       </section>
+    </section>
+  );
+}
+
+interface ShiftRegistrationConfirmationProps {
+  confirmation: ShiftConfirmation;
+  onDismiss(): void;
+}
+
+function ShiftRegistrationConfirmation({
+  confirmation,
+  onDismiss,
+}: ShiftRegistrationConfirmationProps) {
+  return (
+    <section
+      className="turn-confirmation"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span className="turn-confirmation-icon" aria-hidden="true">✓</span>
+      <div>
+        <span className="section-kicker">REGISTRO COMPLETADO</span>
+        <strong>Turno registrado correctamente</strong>
+        <p>
+          {formatServiceDate(confirmation.startsAt)} ·{" "}
+          {formatServiceTime(confirmation.startsAt)}–
+          {formatServiceTime(confirmation.endsAt)}
+        </p>
+        <small>
+          Evaluaciones habilitadas para {confirmation.participantNames.length}{" "}
+          participante{confirmation.participantNames.length === 1 ? "" : "s"}
+          {confirmation.participantNames.length > 0
+            ? `: ${confirmation.participantNames.join(", ")}.`
+            : "."}
+        </small>
+      </div>
+      <button type="button" onClick={onDismiss} aria-label="Cerrar confirmación">
+        ×
+      </button>
     </section>
   );
 }

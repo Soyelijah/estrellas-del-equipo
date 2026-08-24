@@ -71,4 +71,9 @@ test("registers one general shift without asking for an area", () => {
   assert.match(page, /submitShiftDelete/);
   assert.match(page, /Eliminar turno/);
   assert.match(page, /Turno registrado con fechas incorrectas/);
+  assert.match(page, /ShiftRegistrationConfirmation/);
+  assert.match(page, /Turno registrado correctamente/);
+  assert.match(page, /Evaluaciones habilitadas para/);
+  assert.match(page, /aria-live="polite"/);
+  assert.match(page, /Cerrar confirmación/);
 });
