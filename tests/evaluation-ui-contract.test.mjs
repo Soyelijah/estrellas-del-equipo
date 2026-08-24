@@ -93,3 +93,13 @@ test("gives the administrator audited controls over evaluation history", () => {
   assert.match(page, /submitEvaluationModeration/);
   assert.match(page, /submitHistoryDelete/);
 });
+
+test("keeps a slow login from remaining indefinitely in a generic saving state", () => {
+  assert.match(page, /busyLabel="Ingresando…"/);
+  assert.match(page, /LOGIN_SLOW_NOTICE_MS/);
+  assert.match(page, /LOGIN_TIMEOUT_MS/);
+  assert.match(page, /AUTH_STATUS_TIMEOUT_MS/);
+  assert.match(page, /fetchAuthState/);
+  assert.match(page, /El servidor está tardando más de lo habitual/);
+  assert.match(page, /El acceso tardó demasiado/);
+});

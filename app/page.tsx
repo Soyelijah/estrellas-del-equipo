@@ -12,6 +12,10 @@ import {
   onboardingForTeam,
 } from "./view-model";
 
+const LOGIN_SLOW_NOTICE_MS = 4_000;
+const LOGIN_TIMEOUT_MS = 45_000;
+const AUTH_STATUS_TIMEOUT_MS = 15_000;
+
 const jobTitles = {
   head_waiter: "Jefe de garzones",
   waiter: "Garzón",
@@ -231,29 +235,42 @@ export default function Home() {
         );
     }
   }
-  async function refreshAuth() {
+  async function fetchAuthState() {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      AUTH_STATUS_TIMEOUT_MS,
+    );
     try {
       const response = await fetch("/api/auth/status", {
         credentials: "same-origin",
         cache: "no-store",
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error("unavailable");
-      applyAuth(
-        (await response.json()) as Omit<AuthState, "loading" | "unavailable">,
-      );
+      return (await response.json()) as Omit<
+        AuthState,
+        "loading" | "unavailable"
+      >;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+  async function refreshAuth() {
+    setAuth((current) => ({
+      ...current,
+      loading: !current.account,
+      unavailable: false,
+    }));
+    try {
+      applyAuth(await fetchAuthState());
     } catch {
       setAuth((current) => ({ ...current, loading: false, unavailable: true }));
     }
   }
   useEffect(() => {
     let active = true;
-    fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("unavailable");
-        return response.json() as Promise<
-          Omit<AuthState, "loading" | "unavailable">
-        >;
-      })
+    fetchAuthState()
       .then((data) => {
         if (active) applyAuth(data);
       })
@@ -274,17 +291,30 @@ export default function Home() {
     path: string,
     method: "POST" | "PATCH" | "DELETE",
     body: Record<string, unknown>,
+    timeoutMs?: number,
   ) {
-    const response = await fetch(path, {
-      method,
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return {
-      response,
-      result: (await response.json()) as { ok: boolean; error?: string; count?: number },
-    };
+    const controller = new AbortController();
+    const timeout = timeoutMs
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+    try {
+      const response = await fetch(path, {
+        method,
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      return {
+        response,
+        result: (await response.json()) as { ok: boolean; error?: string; count?: number },
+      };
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("request_timeout");
+      throw error;
+    } finally {
+      if (timeout !== null) window.clearTimeout(timeout);
+    }
   }
   function friendlyError(error?: string) {
     const errors: Record<string, string> = {
@@ -354,11 +384,22 @@ export default function Home() {
     setSubmitting(true);
     setMessage("");
     const form = event.currentTarget;
+    const isLogin = path.endsWith("/login");
+    const slowNotice = isLogin
+      ? window.setTimeout(
+          () =>
+            setMessage(
+              "El servidor está tardando más de lo habitual. Seguimos verificando tu acceso…",
+            ),
+          LOGIN_SLOW_NOTICE_MS,
+        )
+      : null;
     try {
       const { response, result } = await requestJson(
         path,
         "POST",
         Object.fromEntries(new FormData(form)),
+        isLogin ? LOGIN_TIMEOUT_MS : undefined,
       );
       if (!response.ok) {
         setMessage(friendlyError(result.error));
@@ -376,9 +417,14 @@ export default function Home() {
         );
       } else setMessage("Sesión iniciada.");
       await refreshAuth();
-    } catch {
-      setMessage("No se pudo conectar con el sistema.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error && error.message === "request_timeout"
+          ? "El acceso tardó demasiado. Intenta nuevamente; tus datos siguen seguros."
+          : "No se pudo conectar con el sistema.",
+      );
     } finally {
+      if (slowNotice !== null) window.clearTimeout(slowNotice);
       setSubmitting(false);
     }
   }
@@ -1051,10 +1097,18 @@ function FormHead({
     </div>
   );
 }
-function SubmitButton({ busy, label }: { busy: boolean; label: string }) {
+function SubmitButton({
+  busy,
+  label,
+  busyLabel = "Guardando…",
+}: {
+  busy: boolean;
+  label: string;
+  busyLabel?: string;
+}) {
   return (
     <button className="access-submit" disabled={busy}>
-      <span>{busy ? "Guardando…" : label}</span>
+      <span>{busy ? busyLabel : label}</span>
       <b>→</b>
     </button>
   );
@@ -1231,7 +1285,11 @@ function AccessGate({
               show={showSecret}
               toggle={() => setShowSecret(!showSecret)}
             />
-            <SubmitButton busy={submitting} label="Entrar al sistema" />
+            <SubmitButton
+              busy={submitting}
+              label="Entrar al sistema"
+              busyLabel="Ingresando…"
+            />
             <button
               className="text-action"
               type="button"
