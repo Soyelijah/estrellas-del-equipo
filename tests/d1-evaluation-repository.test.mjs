@@ -222,7 +222,7 @@ test("opens a real cycle, records a shared shift, and applies the cashier partic
   }
 
   assert.deepEqual(await repository.openEvaluationCycle({
-    organizationId: "org-1", createdByMembershipId: "membership-admin", policyId: "policy-real", periodId: "period-real", auditId: "audit-cycle", name: "Ciclo real", startsAt: "2026-08-23T00:00:00.000Z", endsAt: "2026-09-23T23:59:59.000Z", now: "2026-08-23T00:00:00.000Z",
+    organizationId: "org-1", createdByMembershipId: "membership-admin", policyId: "policy-real", periodId: "period-real", auditId: "audit-cycle", name: "Ciclo real", startsAt: "2026-08-22T00:00:00.000Z", endsAt: "2026-09-23T23:59:59.000Z", now: "2026-08-23T00:00:00.000Z",
     criteria: [
       { id: "criterion-a", code: "teamwork", name: "Equipo", description: "Coopera", category: "teamwork", weightBasisPoints: 5000 },
       { id: "criterion-b", code: "knowledge", name: "Carta", description: "Conoce", category: "knowledge", weightBasisPoints: 5000 },
@@ -234,6 +234,9 @@ test("opens a real cycle, records a shared shift, and applies the cashier partic
   assert.deepEqual(await repository.createEvaluationShift({
     id: "shift-missing", auditId: "audit-shift-missing", organizationId: "org-1", createdByMembershipId: "membership-admin", section: "Salón", startsAt: "2026-08-23T18:00:00.000Z", endsAt: "2026-08-24T02:00:00.000Z", membershipIds: ["membership-waiter", "membership-cashier"], now: "2026-08-24T03:00:00.000Z",
   }), { created: true });
+  assert.deepEqual(await repository.createEvaluationShift({
+    id: "shift-outside", auditId: "audit-shift-outside", organizationId: "org-1", createdByMembershipId: "membership-admin", section: "Salón", startsAt: "2026-09-24T18:00:00.000Z", endsAt: "2026-09-25T02:00:00.000Z", membershipIds: ["membership-waiter", "membership-cashier"], now: "2026-09-25T03:00:00.000Z",
+  }), { created: false, reason: "shift_outside_cycle" });
 
   const participations = database.prepare("SELECT membership_id, can_evaluate, can_be_evaluated FROM evaluation_participations ORDER BY membership_id").all().map((row) => ({ ...row }));
   assert.deepEqual(participations, [

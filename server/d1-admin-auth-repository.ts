@@ -524,9 +524,12 @@ export class D1AdminAuthRepository {
       membershipIds: string[];
       now: string;
     };
-    const period = await this.database.prepare("SELECT id FROM evaluation_periods WHERE organization_id = ? AND status = 'open' ORDER BY starts_at DESC LIMIT 1")
-      .bind(record.organizationId).first<{ id: string }>();
+    const period = await this.database.prepare("SELECT id, starts_at, ends_at FROM evaluation_periods WHERE organization_id = ? AND status = 'open' ORDER BY starts_at DESC LIMIT 1")
+      .bind(record.organizationId).first<{ id: string; starts_at: string; ends_at: string }>();
     if (!period) return { created: false as const, reason: "evaluation_cycle_required" };
+    if (record.startsAt < period.starts_at || record.endsAt > period.ends_at) {
+      return { created: false as const, reason: "shift_outside_cycle" };
+    }
 
     const placeholders = record.membershipIds.map(() => "?").join(", ");
     const members = await this.database.prepare(`

@@ -63,4 +63,9 @@ test("registers one general shift without asking for an area", () => {
   assert.match(page, /defaultChecked/);
   assert.match(page, /Personas que trabajaron juntas/);
   assert.match(page, /Desmarca solamente a quien/);
+  assert.match(page, /name="serviceDate"/);
+  assert.match(page, /name="startTime"/);
+  assert.match(page, /name="endTime"/);
+  assert.doesNotMatch(page, /type="datetime-local"/);
+  assert.match(page, /reconocerá automáticamente el día siguiente/);
 });

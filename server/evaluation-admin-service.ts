@@ -64,8 +64,15 @@ export async function registerEvaluationShift(
   const membershipIds = Array.isArray(input.membershipIds)
     ? [...new Set(input.membershipIds.filter((value): value is string => typeof value === "string" && value.length > 0 && value.length <= 128))]
     : [];
+  const durationMilliseconds =
+    startsAt && endsAt
+      ? new Date(endsAt).getTime() - new Date(startsAt).getTime()
+      : 0;
   if (!section || !startsAt || !endsAt || endsAt <= startsAt || membershipIds.length < 2 || membershipIds.length > 30) {
     return { ok: false as const, status: 422 as const, error: "invalid_evaluation_shift" };
+  }
+  if (durationMilliseconds > 18 * 60 * 60 * 1000) {
+    return { ok: false as const, status: 422 as const, error: "invalid_shift_duration" };
   }
 
   const result = await dependencies.repository.createEvaluationShift({
@@ -80,7 +87,13 @@ export async function registerEvaluationShift(
     now: dependencies.now,
   });
   if (!result.created) {
-    const status = result.reason === "invalid_shift_members" || result.reason === "evaluation_cycle_required" ? 422 : 409;
+    const status = [
+      "invalid_shift_members",
+      "evaluation_cycle_required",
+      "shift_outside_cycle",
+    ].includes(result.reason)
+      ? 422
+      : 409;
     return { ok: false as const, status, error: result.reason };
   }
   return { ok: true as const, status: 201 as const };

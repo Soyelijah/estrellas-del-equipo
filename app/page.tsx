@@ -285,6 +285,10 @@ export default function Home() {
       insufficient_workers: "Necesitas al menos dos trabajadores activos.",
       invalid_evaluation_shift:
         "Selecciona al menos dos personas y revisa las horas.",
+      invalid_shift_duration:
+        "Un turno diario debe durar más de 0 y como máximo 18 horas.",
+      shift_outside_cycle:
+        "La fecha del turno debe estar dentro del ciclo mensual vigente.",
       evaluation_cycle_required: "Primero abre un ciclo de evaluación.",
       invalid_shift_members:
         "El turno contiene una cuenta inactiva o no autorizada.",
@@ -539,8 +543,14 @@ export default function Home() {
     const form = event.currentTarget;
     const data = new FormData(form);
     try {
-      const startsAt = new Date(String(data.get("startsAt"))).toISOString();
-      const endsAt = new Date(String(data.get("endsAt"))).toISOString();
+      const serviceDate = String(data.get("serviceDate") ?? "");
+      const startTime = String(data.get("startTime") ?? "");
+      const endTime = String(data.get("endTime") ?? "");
+      const start = new Date(`${serviceDate}T${startTime}:00`);
+      const end = new Date(`${serviceDate}T${endTime}:00`);
+      if (end <= start) end.setDate(end.getDate() + 1);
+      const startsAt = start.toISOString();
+      const endsAt = end.toISOString();
       const { response, result } = await requestJson(
         "/api/admin/evaluation-shifts",
         "POST",
@@ -1847,14 +1857,22 @@ function AdminOperations({
             </div>
             <div className="form-split">
               <label>
-                Inicio
-                <input name="startsAt" type="datetime-local" required />
+                Fecha del turno
+                <input name="serviceDate" type="date" required />
               </label>
               <label>
-                Término
-                <input name="endsAt" type="datetime-local" required />
+                Hora de inicio
+                <input name="startTime" type="time" required />
+              </label>
+              <label>
+                Hora de término
+                <input name="endTime" type="time" required />
               </label>
             </div>
+            <small className="form-hint">
+              Si termina después de medianoche, usa una hora menor que la de
+              inicio. El sistema reconocerá automáticamente el día siguiente.
+            </small>
             <fieldset className="member-selector">
               <legend>Personas que trabajaron juntas</legend>
               {members.map((member) => (
