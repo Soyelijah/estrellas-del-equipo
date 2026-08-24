@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useReducer, useState } from "react";
 import {
   allocateTipPoolByExperienceFactors,
   formatExperienceFactor,
@@ -11,6 +11,8 @@ import {
   evaluationWorkspaceState,
   navigationForRole,
   onboardingForTeam,
+  shiftRemovalReducer,
+  type ShiftRemovalState,
 } from "./view-model";
 import { retryRead } from "./resilient-read";
 
@@ -247,6 +249,15 @@ export default function Home() {
   const [workspaceUnavailable, setWorkspaceUnavailable] = useState(false);
   const [shiftConfirmation, setShiftConfirmation] =
     useState<ShiftConfirmation | null>(null);
+  const [shiftRemoval, dispatchShiftRemoval] = useReducer(
+    shiftRemovalReducer,
+    {
+      status: "idle",
+      target: null,
+      error: null,
+      success: null,
+    },
+  );
 
   function applyAuth(data: Omit<AuthState, "loading" | "unavailable">) {
     setAuth({ ...data, loading: false, unavailable: false });
@@ -354,7 +365,7 @@ export default function Home() {
         "La fecha del turno debe estar dentro del ciclo mensual vigente.",
       invalid_shift_delete: "Escribe un motivo claro para eliminar el turno.",
       shift_has_evaluations:
-        "Este turno ya tiene evaluaciones y no puede eliminarse directamente.",
+        "Este turno ya tiene evaluaciones. Anula primero esas evaluaciones desde Historial y luego vuelve a intentarlo.",
       evaluation_shift_not_found: "El turno ya no está disponible.",
       evaluation_cycle_required: "Primero abre un ciclo de evaluación.",
       invalid_shift_members:
@@ -682,31 +693,36 @@ export default function Home() {
       setSubmitting(false);
     }
   }
-  async function submitShiftDelete(
-    event: FormEvent<HTMLFormElement>,
-    shiftId: string,
-  ) {
+  async function submitShiftDelete(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitting(true);
-    setMessage("");
+    if (!shiftRemoval.target) return;
+    dispatchShiftRemoval({ type: "submit" });
     const form = event.currentTarget;
     const data = new FormData(form);
     try {
       const { response, result } = await requestJson(
-        `/api/admin/evaluation-shifts/${shiftId}`,
+        `/api/admin/evaluation-shifts/${shiftRemoval.target.id}`,
         "DELETE",
         { reason: data.get("reason") },
       );
       if (!response.ok) {
-        setMessage(friendlyError(result.error));
+        dispatchShiftRemoval({
+          type: "fail",
+          message: friendlyError(result.error),
+        });
         return;
       }
-      setMessage("Turno eliminado. Las cuentas y el ciclo permanecen intactos.");
+      dispatchShiftRemoval({
+        type: "succeed",
+        message: `Turno del ${formatServiceDate(shiftRemoval.target.startsAt)} eliminado correctamente.`,
+      });
       await loadOperations();
     } catch {
-      setMessage("No se pudo eliminar el turno.");
-    } finally {
-      setSubmitting(false);
+      dispatchShiftRemoval({
+        type: "fail",
+        message:
+          "No pudimos eliminar el turno por un problema de conexión. Inténtalo nuevamente; el registro no fue modificado.",
+      });
     }
   }
   async function submitEvaluationModeration(
@@ -992,6 +1008,24 @@ export default function Home() {
             submitCycle={submitCycle}
             submitShift={submitShift}
             submitShiftDelete={submitShiftDelete}
+            shiftRemoval={shiftRemoval}
+            chooseShiftRemoval={(shift) =>
+              dispatchShiftRemoval({
+                type: "choose",
+                target: {
+                  id: shift.id,
+                  startsAt: shift.startsAt,
+                  endsAt: shift.endsAt,
+                  memberCount: shift.memberCount,
+                },
+              })
+            }
+            cancelShiftRemoval={() =>
+              dispatchShiftRemoval({ type: "cancel" })
+            }
+            dismissShiftRemovalSuccess={() =>
+              dispatchShiftRemoval({ type: "dismiss-success" })
+            }
             submitEvaluationModeration={submitEvaluationModeration}
             submitHistoryDelete={submitHistoryDelete}
             shiftConfirmation={shiftConfirmation}
@@ -1862,6 +1896,10 @@ function AdminOperations({
   submitCycle,
   submitShift,
   submitShiftDelete,
+  shiftRemoval,
+  chooseShiftRemoval,
+  cancelShiftRemoval,
+  dismissShiftRemovalSuccess,
   submitEvaluationModeration,
   submitHistoryDelete,
   shiftConfirmation,
@@ -1874,10 +1912,11 @@ function AdminOperations({
   submitting: boolean;
   submitCycle(event: FormEvent<HTMLFormElement>): Promise<void>;
   submitShift(event: FormEvent<HTMLFormElement>): Promise<void>;
-  submitShiftDelete(
-    event: FormEvent<HTMLFormElement>,
-    shiftId: string,
-  ): Promise<void>;
+  submitShiftDelete(event: FormEvent<HTMLFormElement>): Promise<void>;
+  shiftRemoval: ShiftRemovalState;
+  chooseShiftRemoval(shift: EvaluationOperations["shifts"][number]): void;
+  cancelShiftRemoval(): void;
+  dismissShiftRemovalSuccess(): void;
   submitEvaluationModeration(
     event: FormEvent<HTMLFormElement>,
     submissionId: string,
@@ -2334,6 +2373,27 @@ function AdminOperations({
             {operations?.shifts.length ?? 0} registros
           </span>
         </div>
+        {shiftRemoval.success && (
+          <section
+            className="shift-removal-success"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span aria-hidden="true">✓</span>
+            <div>
+              <strong>Registro actualizado</strong>
+              <p>{shiftRemoval.success}</p>
+            </div>
+            <button
+              type="button"
+              onClick={dismissShiftRemovalSuccess}
+              aria-label="Cerrar confirmación de turno eliminado"
+            >
+              ×
+            </button>
+          </section>
+        )}
         {!operations?.shifts.length ? (
           <Empty
             title="Todavía no hay turnos"
@@ -2353,32 +2413,124 @@ function AdminOperations({
                   </p>
                 </div>
                 <div className="shift-actions">
-                  <b>{shift.memberCount} personas</b>
-                  <form
-                    onSubmit={(event) =>
-                      void submitShiftDelete(event, shift.id)
-                    }
+                  <span className="shift-ledger-status">
+                    <b>{shift.memberCount} personas</b>
+                    <small>Evaluaciones habilitadas</small>
+                  </span>
+                  <button
+                    type="button"
+                    className="danger-action"
+                    disabled={shiftRemoval.status === "submitting"}
+                    onClick={() => chooseShiftRemoval(shift)}
                   >
-                    <input
-                      name="reason"
-                      required
-                      minLength={8}
-                      maxLength={240}
-                      defaultValue="Turno registrado con fechas incorrectas"
-                      aria-label={`Motivo para eliminar el turno del ${formatServiceDate(shift.startsAt)}`}
-                    />
-                    <button className="danger-action" disabled={submitting}>
-                      Eliminar turno
-                    </button>
-                  </form>
+                    Eliminar turno
+                  </button>
                 </div>
               </article>
             ))}
           </div>
         )}
+        {shiftRemoval.target && (
+          <ShiftRemovalDialog
+            state={shiftRemoval}
+            onCancel={cancelShiftRemoval}
+            onSubmit={submitShiftDelete}
+          />
+        )}
       </section>
       )}
     </section>
+  );
+}
+
+function ShiftRemovalDialog({
+  state,
+  onCancel,
+  onSubmit,
+}: {
+  state: ShiftRemovalState;
+  onCancel(): void;
+  onSubmit(event: FormEvent<HTMLFormElement>): Promise<void>;
+}) {
+  if (!state.target) return null;
+  const busy = state.status === "submitting";
+  return (
+    <div className="confirmation-backdrop" role="presentation">
+      <section
+        className="shift-removal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shift-removal-title"
+        aria-describedby="shift-removal-description"
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !busy) onCancel();
+        }}
+      >
+        <header>
+          <span className="confirmation-seal" aria-hidden="true">!</span>
+          <div>
+            <span className="section-kicker">CONFIRMACIÓN REQUERIDA</span>
+            <h3 id="shift-removal-title">¿Eliminar este turno registrado?</h3>
+          </div>
+          <button
+            type="button"
+            className="dialog-close"
+            onClick={onCancel}
+            disabled={busy}
+            aria-label="Cancelar eliminación del turno"
+          >
+            ×
+          </button>
+        </header>
+        <div className="shift-removal-summary">
+          <span>Turno general</span>
+          <strong>
+            {formatServiceDate(state.target.startsAt)} ·{" "}
+            {formatServiceTime(state.target.startsAt)}–
+            {formatServiceTime(state.target.endsAt)}
+          </strong>
+          <small>{state.target.memberCount} personas registradas</small>
+        </div>
+        <p id="shift-removal-description" className="dialog-warning">
+          Se quitará este turno de las jornadas de sus participantes. Las cuentas
+          y el ciclo mensual no se eliminarán. Si ya existen evaluaciones, el
+          sistema protegerá el historial y no realizará ningún cambio.
+        </p>
+        <form onSubmit={(event) => void onSubmit(event)}>
+          <label>
+            Motivo de la eliminación
+            <textarea
+              name="reason"
+              required
+              minLength={8}
+              maxLength={240}
+              defaultValue="Turno registrado con fechas incorrectas"
+              autoFocus
+            />
+            <small>Este motivo quedará registrado en la auditoría.</small>
+          </label>
+          {state.error && (
+            <div className="shift-removal-error" role="alert">
+              <strong>No se eliminó el turno</strong>
+              <p>{state.error}</p>
+            </div>
+          )}
+          <div className="dialog-actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={onCancel}
+              disabled={busy}
+            >
+              Conservar turno
+            </button>
+            <button className="danger-confirm" disabled={busy}>
+              {busy ? "Eliminando…" : "Sí, eliminar turno"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 

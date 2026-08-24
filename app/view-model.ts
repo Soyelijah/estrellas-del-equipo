@@ -7,6 +7,62 @@ export type AppView =
   | "evaluaciones"
   | "acuerdo";
 
+export type ShiftRemovalTarget = {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  memberCount: number;
+};
+
+export type ShiftRemovalState = {
+  status: "idle" | "confirming" | "submitting";
+  target: ShiftRemovalTarget | null;
+  error: string | null;
+  success: string | null;
+};
+
+export type ShiftRemovalAction =
+  | { type: "choose"; target: ShiftRemovalTarget }
+  | { type: "submit" }
+  | { type: "fail"; message: string }
+  | { type: "succeed"; message: string }
+  | { type: "cancel" }
+  | { type: "dismiss-success" };
+
+export function shiftRemovalReducer(
+  state: ShiftRemovalState,
+  action: ShiftRemovalAction,
+): ShiftRemovalState {
+  switch (action.type) {
+    case "choose":
+      return {
+        status: "confirming",
+        target: action.target,
+        error: null,
+        success: null,
+      };
+    case "submit":
+      return state.target
+        ? { ...state, status: "submitting", error: null }
+        : state;
+    case "fail":
+      return state.target
+        ? { ...state, status: "confirming", error: action.message }
+        : state;
+    case "succeed":
+      return {
+        status: "idle",
+        target: null,
+        error: null,
+        success: action.message,
+      };
+    case "cancel":
+      return { status: "idle", target: null, error: null, success: null };
+    case "dismiss-success":
+      return { ...state, success: null };
+  }
+}
+
 const adminNavigation = [
   { id: "inicio", label: "Inicio", icon: "⌂" },
   { id: "equipo", label: "Equipo", icon: "♙" },

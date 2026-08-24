@@ -6,6 +6,7 @@ import {
   evaluationWorkspaceState,
   navigationForRole,
   onboardingForTeam,
+  shiftRemovalReducer,
 } from "../app/view-model.ts";
 
 test("does not confuse a failed workspace read with an empty evaluation cycle", () => {
@@ -65,6 +66,60 @@ test("separates missing daily evaluations from the real monthly score", () => {
       completionPercent: 0,
       pendingSubmissions: 0,
       label: "Sin turnos evaluables",
+    },
+  );
+});
+
+test("keeps the shift confirmation open and explains a failed removal", () => {
+  const target = {
+    id: "shift-1",
+    startsAt: "2026-08-24T15:00:00.000Z",
+    endsAt: "2026-08-25T01:00:00.000Z",
+    memberCount: 5,
+  };
+
+  const confirming = shiftRemovalReducer(
+    { status: "idle", target: null, error: null, success: null },
+    { type: "choose", target },
+  );
+  const submitting = shiftRemovalReducer(confirming, { type: "submit" });
+  const failed = shiftRemovalReducer(submitting, {
+    type: "fail",
+    message:
+      "Este turno ya tiene evaluaciones. Anula primero esas evaluaciones desde Historial.",
+  });
+
+  assert.deepEqual(failed, {
+    status: "confirming",
+    target,
+    error:
+      "Este turno ya tiene evaluaciones. Anula primero esas evaluaciones desde Historial.",
+    success: null,
+  });
+});
+
+test("closes the shift confirmation only after a successful removal and announces it", () => {
+  const target = {
+    id: "shift-2",
+    startsAt: "2026-08-24T15:00:00.000Z",
+    endsAt: "2026-08-25T01:00:00.000Z",
+    memberCount: 3,
+  };
+  const confirming = shiftRemovalReducer(
+    { status: "idle", target: null, error: null, success: null },
+    { type: "choose", target },
+  );
+
+  assert.deepEqual(
+    shiftRemovalReducer(confirming, {
+      type: "succeed",
+      message: "Turno eliminado correctamente.",
+    }),
+    {
+      status: "idle",
+      target: null,
+      error: null,
+      success: "Turno eliminado correctamente.",
     },
   );
 });
