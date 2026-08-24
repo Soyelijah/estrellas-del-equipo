@@ -282,7 +282,7 @@ export class D1AdminAuthRepository {
     let summary: Record<string, unknown> | null = null;
     if (period) {
       const periodId = String(period.id);
-      const [dailyRows, resultRows, criterionRows, subjectDailyRows] = await Promise.all([
+      const [dailyRows, resultRows, criterionRows, subjectDailyRows, cycleCriteriaRows] = await Promise.all([
         this.database.prepare(`
           SELECT substr(s.starts_at, 1, 10) AS serviceDate,
             COUNT(*) AS expectedSubmissions,
@@ -376,6 +376,18 @@ export class D1AdminAuthRepository {
           serviceDate: string;
           actualScore: number | null;
         }>(),
+        this.database.prepare(`
+          SELECT c.id, c.name, c.description, c.weight_basis_points AS weightBasisPoints
+          FROM criteria c
+          JOIN evaluation_periods ep ON ep.policy_version_id = c.policy_version_id
+          WHERE ep.id = ? AND c.measurement_type = 'peer_rating'
+          ORDER BY c.created_at, c.id
+        `).bind(periodId).all<{
+          id: string;
+          name: string;
+          description: string;
+          weightBasisPoints: number;
+        }>(),
       ]);
 
       const daily = dailyRows.results.map((row) => ({
@@ -422,11 +434,19 @@ export class D1AdminAuthRepository {
         daily,
         results,
       };
+      return {
+        period,
+        members: members.results.map((member) => ({ ...member, canEvaluate: member.canEvaluate === 1, canBeEvaluated: member.canBeEvaluated === 1 })),
+        shifts: shifts.results,
+        criteria: cycleCriteriaRows.results,
+        summary,
+      };
     }
     return {
       period,
       members: members.results.map((member) => ({ ...member, canEvaluate: member.canEvaluate === 1, canBeEvaluated: member.canBeEvaluated === 1 })),
       shifts: shifts.results,
+      criteria: [],
       summary,
     };
   }

@@ -76,6 +76,12 @@ type EvaluationOperations = {
     status: string;
     submissionCount: number;
   } | null;
+  criteria: Array<{
+    id: string;
+    name: string;
+    description: string;
+    weightBasisPoints: number;
+  }>;
   members: Array<{
     membershipId: string;
     displayName: string;
@@ -1736,6 +1742,25 @@ function AdminOperations({
               Los trabajadores activos participan. La cajera puede evaluar, pero
               conserva su acuerdo de no ser evaluada.
             </p>
+            <div className="official-criteria">
+              <div className="official-criteria-head">
+                <div>
+                  <span className="section-kicker">MATRIZ OFICIAL</span>
+                  <strong>6 criterios · misma importancia</strong>
+                </div>
+                <span className="status neutral">Escala 1 a 5</span>
+              </div>
+              {operations.criteria.map((criterion, index) => (
+                <article key={criterion.id}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <div>
+                    <strong>{criterion.name}</strong>
+                    <p>{criterion.description}</p>
+                  </div>
+                  <small>Mismo peso</small>
+                </article>
+              ))}
+            </div>
           </article>
         ) : (
           <form
