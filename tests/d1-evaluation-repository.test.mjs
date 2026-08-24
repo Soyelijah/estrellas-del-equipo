@@ -140,6 +140,27 @@ test("persists a one-time administrator, its hashed session, and managed users a
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE action = 'user.created'").get().count, 1);
 });
 
+test("loads the session actor and organization users in one database snapshot", async () => {
+  const { repository } = createEmptyAdminFixture();
+  await repository.saveBootstrap({
+    organization: { id: "org-1", name: "Restaurante", createdAt: "2026-08-22T12:00:00.000Z" },
+    user: { id: "admin-1", authSubject: "local:admin-1", displayName: "Jefe", loginIdentifier: "jefe", passwordHash: "admin-hash", status: "active", createdAt: "2026-08-22T12:00:00.000Z" },
+    membership: { id: "membership-admin", organizationId: "org-1", userId: "admin-1", role: "admin", joinedAt: "2026-08-22T12:00:00.000Z" },
+    guard: { key: "administrator_bootstrap", createdAt: "2026-08-22T12:00:00.000Z" },
+  });
+  await repository.createManagedUser({
+    user: { id: "worker-1", authSubject: "local:worker-1", displayName: "Roberto", loginIdentifier: "roberto", passwordHash: "worker-hash", jobTitle: "waiter", status: "active", createdAt: "2026-08-22T13:00:00.000Z" },
+    membership: { id: "membership-worker", organizationId: "org-1", userId: "worker-1", role: "worker", joinedAt: "2026-08-22T13:00:00.000Z", createdByMembershipId: "membership-admin", tipFactorHundredths: 65 },
+  });
+  await repository.saveSession({ id: "session-worker", userId: "worker-1", tokenHash: "session-hash", expiresAt: "2026-08-23T00:00:00.000Z", createdAt: "2026-08-22T13:00:00.000Z" });
+
+  const snapshot = await repository.findSessionSnapshot("session-hash", "2026-08-22T14:00:00.000Z");
+  assert.deepEqual(snapshot, {
+    actor: { userId: "worker-1", displayName: "Roberto", role: "worker", organizationId: "org-1", membershipId: "membership-worker" },
+    users: [{ id: "worker-1", displayName: "Roberto", loginIdentifier: "roberto", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }],
+  });
+});
+
 test("recovers the administrator password atomically, revokes sessions, and records no secret", async () => {
   const { database, repository } = createEmptyAdminFixture();
   await repository.saveBootstrap({

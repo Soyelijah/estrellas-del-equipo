@@ -26,6 +26,16 @@ export function navigationForRole(role: string) {
   return role === "admin" ? adminNavigation : workerNavigation;
 }
 
+export function evaluationWorkspaceState(input: {
+  loading: boolean;
+  unavailable: boolean;
+  hasWorkspace: boolean;
+}) {
+  if (input.loading && !input.hasWorkspace) return "loading" as const;
+  if (input.unavailable && !input.hasWorkspace) return "unavailable" as const;
+  return input.hasWorkspace ? "ready" as const : "empty" as const;
+}
+
 export function onboardingForTeam(team: Array<{ id: string }>) {
   const created = team.length;
   return {

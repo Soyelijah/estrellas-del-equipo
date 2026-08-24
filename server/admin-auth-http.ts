@@ -19,6 +19,10 @@ type AuthDependencies = {
     setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
     resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     findSessionActor(tokenHash: string, now: string): Promise<{ userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string } | null>;
+    findSessionSnapshot(tokenHash: string, now: string): Promise<{
+      actor: { userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string };
+      users: Array<Record<string, unknown>>;
+    } | null>;
     revokeSession(tokenHash: string, now: string): Promise<void>;
     listOrganizationUsers(organizationId: string): Promise<unknown[]>;
     listAuditEvents(organizationId: string, limit: number): Promise<unknown[]>;
@@ -101,13 +105,18 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
   const path = new URL(request.url).pathname;
   try {
     if (path === "/api/auth/status" && request.method === "GET") {
-      const [bootstrap, actor] = await Promise.all([
+      const token = cookieValue(request);
+      const tokenHash = token ? await dependencies.hashToken(token) : null;
+      const [bootstrap, session] = await Promise.all([
         dependencies.repository.getBootstrapState(),
-        actorFor(request, dependencies),
+        tokenHash
+          ? dependencies.repository.findSessionSnapshot(tokenHash, dependencies.now())
+          : Promise.resolve(null),
       ]);
+      const actor = session?.actor ?? null;
       const setupUnlocked = bootstrap.allowed && await dependencies.verifySetupGrant(cookieValue(request, SETUP_COOKIE_NAME));
       const recoveryUnlocked = !bootstrap.allowed && await dependencies.verifyRecoveryGrant(cookieValue(request, RECOVERY_COOKIE_NAME));
-      const organizationUsers = actor ? await dependencies.repository.listOrganizationUsers(actor.organizationId) as Array<Record<string, unknown>> : [];
+      const organizationUsers = session?.users ?? [];
       const users = actor?.role === "admin" ? organizationUsers : [];
       const team = organizationUsers.map((member) => ({
         id: member.id,

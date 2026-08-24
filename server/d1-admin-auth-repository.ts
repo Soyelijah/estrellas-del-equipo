@@ -249,6 +249,57 @@ export class D1AdminAuthRepository {
     `).bind(tokenHash, now).first<{ userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string }>();
   }
 
+  async findSessionSnapshot(tokenHash: string, now: string) {
+    const rows = await this.database.prepare(`
+      WITH actor AS (
+        SELECT u.id AS userId, u.display_name AS displayName, m.role,
+          m.organization_id AS organizationId, m.id AS membershipId
+        FROM auth_sessions s
+        JOIN users u ON u.id = s.user_id AND u.status = 'active' AND u.deleted_at IS NULL
+        JOIN memberships m ON m.user_id = u.id AND m.deleted_at IS NULL
+        JOIN organizations o ON o.id = m.organization_id AND o.status = 'active' AND o.deleted_at IS NULL
+        WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?
+        ORDER BY m.starts_at DESC
+        LIMIT 1
+      )
+      SELECT actor.userId, actor.displayName, actor.role, actor.organizationId, actor.membershipId,
+        team.id AS teamId, team.display_name AS teamDisplayName,
+        team.login_identifier AS teamLoginIdentifier, team.status AS teamStatus,
+        team_membership.role AS teamRole, team_membership.job_title AS teamJobTitle,
+        team_membership.tip_factor_hundredths AS teamTipFactorHundredths
+      FROM actor
+      LEFT JOIN memberships team_membership
+        ON team_membership.organization_id = actor.organizationId
+        AND team_membership.role <> 'admin'
+        AND team_membership.deleted_at IS NULL
+      LEFT JOIN users team
+        ON team.id = team_membership.user_id AND team.deleted_at IS NULL
+      ORDER BY team.created_at, team.display_name
+    `).bind(tokenHash, now).all<Record<string, unknown>>();
+    if (rows.results.length === 0) return null;
+    const first = rows.results[0];
+    return {
+      actor: {
+        userId: String(first.userId),
+        displayName: String(first.displayName),
+        role: first.role as "admin" | "team_lead" | "worker" | "independent_reviewer",
+        organizationId: String(first.organizationId),
+        membershipId: String(first.membershipId),
+      },
+      users: rows.results
+        .filter((row) => row.teamId !== null && row.teamId !== undefined)
+        .map((row) => ({
+          id: row.teamId,
+          displayName: row.teamDisplayName,
+          loginIdentifier: row.teamLoginIdentifier,
+          status: row.teamStatus,
+          role: row.teamRole,
+          jobTitle: row.teamJobTitle,
+          tipFactorHundredths: row.teamTipFactorHundredths,
+        })),
+    };
+  }
+
   async revokeSession(tokenHash: string, now: string) {
     await this.database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL")
       .bind(now, tokenHash).run();

@@ -3,9 +3,17 @@ import test from "node:test";
 
 import {
   evaluationCompletionState,
+  evaluationWorkspaceState,
   navigationForRole,
   onboardingForTeam,
 } from "../app/view-model.ts";
+
+test("does not confuse a failed workspace read with an empty evaluation cycle", () => {
+  assert.equal(evaluationWorkspaceState({ loading: true, unavailable: false, hasWorkspace: false }), "loading");
+  assert.equal(evaluationWorkspaceState({ loading: false, unavailable: true, hasWorkspace: false }), "unavailable");
+  assert.equal(evaluationWorkspaceState({ loading: false, unavailable: false, hasWorkspace: false }), "empty");
+  assert.equal(evaluationWorkspaceState({ loading: false, unavailable: false, hasWorkspace: true }), "ready");
+});
 
 test("separates administrator navigation from the worker evaluation area", () => {
   assert.deepEqual(

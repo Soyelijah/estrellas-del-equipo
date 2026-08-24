@@ -25,6 +25,7 @@ function dependencies(overrides = {}) {
       async setManagedUserStatus() { return { updated: true }; },
       async resetManagedUserPassword() { return { updated: true }; },
       async findSessionActor() { return null; },
+      async findSessionSnapshot() { return null; },
       async revokeSession() {},
       async listOrganizationUsers() { return []; },
       async listAuditEvents() { return []; },
@@ -106,13 +107,37 @@ test("status exposes bootstrap state but never password hashes or session tokens
 test("exposes a sanitized team to workers without administrative login identifiers", async () => {
   const team = [{ id: "u1", displayName: "Garzón", loginIdentifier: "garzon.privado", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }];
   const response = await handleAdminAuthRequest(new Request("https://equipo.example/api/auth/status", { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository: {
-    async findSessionActor() { return { userId: "u1", displayName: "Garzón", role: "worker", organizationId: "o1", membershipId: "m1" }; },
-    async listOrganizationUsers() { return team; },
+    async findSessionSnapshot() { return { actor: { userId: "u1", displayName: "Garzón", role: "worker", organizationId: "o1", membershipId: "m1" }, users: team }; },
   } }));
   const body = await response.json();
   assert.deepEqual(body.users, []);
   assert.deepEqual(body.team, [{ id: "u1", displayName: "Garzón", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }]);
   assert.equal(JSON.stringify(body).includes("garzon.privado"), false);
+});
+
+test("loads authenticated status through one session snapshot without sequential user queries", async () => {
+  const team = [{ id: "u2", displayName: "Compañera", loginIdentifier: "privado", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75 }];
+  const response = await handleAdminAuthRequest(
+    new Request("https://equipo.example/api/auth/status", { headers: { cookie: "estrellas_session=private-cookie-token" } }),
+    dependencies({ repository: {
+      async getBootstrapState() { return { allowed: false, organizationId: null }; },
+      async findSessionSnapshot(tokenHash, now) {
+        assert.equal(tokenHash, "token-hash");
+        assert.equal(now, "2026-08-22T12:00:00.000Z");
+        return {
+          actor: { userId: "u1", displayName: "Roberto", role: "worker", organizationId: "o1", membershipId: "m1" },
+          users: team,
+        };
+      },
+      async findSessionActor() { throw new Error("status must not perform a second session query"); },
+      async listOrganizationUsers() { throw new Error("status must not perform a sequential users query"); },
+    } }),
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.account, { displayName: "Roberto", role: "worker" });
+  assert.deepEqual(body.team, [{ id: "u2", displayName: "Compañera", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75 }]);
 });
 
 test("reports a valid scoped recovery grant only after administrator setup is closed", async () => {

@@ -8,13 +8,37 @@ import {
 import {
   AppView,
   evaluationCompletionState,
+  evaluationWorkspaceState,
   navigationForRole,
   onboardingForTeam,
 } from "./view-model";
+import { retryRead } from "./resilient-read";
 
 const LOGIN_SLOW_NOTICE_MS = 4_000;
 const LOGIN_TIMEOUT_MS = 45_000;
-const AUTH_STATUS_TIMEOUT_MS = 15_000;
+const AUTH_STATUS_TIMEOUT_MS = 5_000;
+const READ_RETRY_DELAYS_MS = [250, 750] as const;
+
+async function readJsonWithRetry<T>(path: string): Promise<T> {
+  return retryRead(async () => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      AUTH_STATUS_TIMEOUT_MS,
+    );
+    try {
+      const response = await fetch(path, {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`read_failed_${response.status}`);
+      return (await response.json()) as T;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }, READ_RETRY_DELAYS_MS);
+}
 
 const jobTitles = {
   head_waiter: "Jefe de garzones",
@@ -220,6 +244,7 @@ export default function Home() {
   );
   const [workspace, setWorkspace] = useState<EvaluationWorkspace | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceUnavailable, setWorkspaceUnavailable] = useState(false);
   const [shiftConfirmation, setShiftConfirmation] =
     useState<ShiftConfirmation | null>(null);
 
@@ -236,25 +261,9 @@ export default function Home() {
     }
   }
   async function fetchAuthState() {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(
-      () => controller.abort(),
-      AUTH_STATUS_TIMEOUT_MS,
+    return readJsonWithRetry<Omit<AuthState, "loading" | "unavailable">>(
+      "/api/auth/status",
     );
-    try {
-      const response = await fetch("/api/auth/status", {
-        credentials: "same-origin",
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error("unavailable");
-      return (await response.json()) as Omit<
-        AuthState,
-        "loading" | "unavailable"
-      >;
-    } finally {
-      window.clearTimeout(timeout);
-    }
   }
   async function refreshAuth() {
     setAuth((current) => ({
@@ -486,12 +495,12 @@ export default function Home() {
   async function loadAudit() {
     setAuditLoading(true);
     try {
-      const response = await fetch("/api/admin/audit?limit=50", {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const data = (await response.json()) as { events?: AuditEvent[] };
-      setAuditEvents(response.ok ? (data.events ?? []) : []);
+      const data = await readJsonWithRetry<{ events?: AuditEvent[] }>(
+        "/api/admin/audit?limit=50",
+      );
+      setAuditEvents(data.events ?? []);
+    } catch {
+      setMessage("No fue posible actualizar la auditoría. Volveremos a intentarlo cuando la abras nuevamente.");
     } finally {
       setAuditLoading(false);
     }
@@ -499,29 +508,26 @@ export default function Home() {
   async function loadOperations() {
     setWorkspaceLoading(true);
     try {
-      const response = await fetch("/api/admin/evaluation-operations", {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const data = (await response.json()) as {
+      const data = await readJsonWithRetry<{
         operations?: EvaluationOperations;
-      };
-      setOperations(response.ok ? (data.operations ?? null) : null);
+      }>("/api/admin/evaluation-operations");
+      setOperations(data.operations ?? null);
+    } catch {
+      setMessage("No fue posible actualizar las evaluaciones. Intenta abrir nuevamente esta sección.");
     } finally {
       setWorkspaceLoading(false);
     }
   }
   async function loadEvaluationWorkspace() {
     setWorkspaceLoading(true);
+    setWorkspaceUnavailable(false);
     try {
-      const response = await fetch("/api/evaluations", {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const data = (await response.json()) as {
+      const data = await readJsonWithRetry<{
         workspace?: EvaluationWorkspace;
-      };
-      setWorkspace(response.ok ? (data.workspace ?? null) : null);
+      }>("/api/evaluations");
+      setWorkspace(data.workspace ?? null);
+    } catch {
+      setWorkspaceUnavailable(true);
     } finally {
       setWorkspaceLoading(false);
     }
@@ -859,8 +865,11 @@ export default function Home() {
         <Brand />
         <section className="access-problem" role="alert">
           <span>!</span>
-          <h1>No se pudo abrir el acceso</h1>
-          <p>La base de datos no está respondiendo.</p>
+          <h1>La conexión está tardando más de lo esperado</h1>
+          <p>
+            Ya hicimos varios intentos seguros. Puedes volver a conectar sin
+            perder información.
+          </p>
           <button className="primary" onClick={() => void refreshAuth()}>
             Volver a intentar
           </button>
@@ -1005,7 +1014,9 @@ export default function Home() {
           <EvaluationDesk
             workspace={workspace}
             loading={workspaceLoading}
+            unavailable={workspaceUnavailable}
             submitting={submitting}
+            retry={loadEvaluationWorkspace}
             submitEvaluation={submitEvaluation}
           />
         )}
@@ -2557,22 +2568,49 @@ function MonthlyEvaluationSummary({
 function EvaluationDesk({
   workspace,
   loading,
+  unavailable,
   submitting,
+  retry,
   submitEvaluation,
 }: {
   workspace: EvaluationWorkspace | null;
   loading: boolean;
+  unavailable: boolean;
   submitting: boolean;
+  retry(): Promise<void>;
   submitEvaluation(
     event: FormEvent<HTMLFormElement>,
     assignment: EvaluationWorkspace["assignments"][number],
   ): Promise<void>;
 }) {
-  if (loading && !workspace)
+  const state = evaluationWorkspaceState({
+    loading,
+    unavailable,
+    hasWorkspace: Boolean(workspace),
+  });
+  if (state === "loading")
     return (
       <div className="empty-state" aria-busy="true">
         Buscando tus turnos compartidos…
       </div>
+    );
+  if (state === "unavailable")
+    return (
+      <section className="data-section">
+        <div className="workspace-retry" role="alert">
+          <span>↻</span>
+          <div>
+            <h2>No pudimos actualizar tu jornada</h2>
+            <p>
+              Esto es una demora de conexión; no significa que no tengas
+              compañeros pendientes.
+            </p>
+          </div>
+          <button className="primary" onClick={() => void retry()}>
+            Reintentar ahora
+          </button>
+        </div>
+      </section>
     );
   if (!workspace?.period)
     return (
