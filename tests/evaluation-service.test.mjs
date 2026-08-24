@@ -37,9 +37,9 @@ const body = {
   shiftId: "shift-1",
   subjectMembershipId: "membership-subject",
   ratings: [
-    { criterionId: "criterion-teamwork", responseStatus: "rated", value: 5 },
-    { criterionId: "criterion-knowledge", responseStatus: "not_observed", value: null },
-    { criterionId: "criterion-accuracy", responseStatus: "rated", value: 4 },
+    { criterionId: "criterion-teamwork", responseStatus: "rated", value: 5, evidenceNote: null },
+    { criterionId: "criterion-knowledge", responseStatus: "not_observed", value: null, evidenceNote: "No compartimos esa tarea durante el turno." },
+    { criterionId: "criterion-accuracy", responseStatus: "rated", value: 4, evidenceNote: null },
   ],
 };
 
@@ -140,11 +140,37 @@ test("derives the rater from the session and saves one attributed submission", a
       submittedAt: "2026-08-15T12:00:00.000Z",
     },
     observations: [
-      { id: "observation-1", criterionId: "criterion-teamwork", responseStatus: "rated", value: 5 },
-      { id: "observation-2", criterionId: "criterion-knowledge", responseStatus: "not_observed", value: null },
-      { id: "observation-3", criterionId: "criterion-accuracy", responseStatus: "rated", value: 4 },
+      { id: "observation-1", criterionId: "criterion-teamwork", responseStatus: "rated", value: 5, evidenceNote: null },
+      { id: "observation-2", criterionId: "criterion-knowledge", responseStatus: "not_observed", value: null, evidenceNote: "No compartimos esa tarea durante el turno." },
+      { id: "observation-3", criterionId: "criterion-accuracy", responseStatus: "rated", value: 4, evidenceNote: null },
     ],
   }]);
+});
+
+test("rejects no-observation without its required explanation", async () => {
+  const repository = createRepository();
+  const result = await submitEvaluation(
+    {
+      identity,
+      body: {
+        ...body,
+        ratings: body.ratings.map((rating) =>
+          rating.responseStatus === "not_observed"
+            ? { ...rating, evidenceNote: "" }
+            : rating,
+        ),
+      },
+      now: "2026-08-15T12:00:00.000Z",
+    },
+    { repository, createId: () => "unused" },
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    status: 422,
+    error: "missing_observation_note",
+  });
+  assert.deepEqual(repository.saved, []);
 });
 
 test("rejects a client-selected rater and does not persist it", async () => {

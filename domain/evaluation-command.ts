@@ -5,6 +5,7 @@ export type RatingInput = {
   criterionId: string;
   responseStatus: "rated" | "not_observed";
   value: number | null;
+  evidenceNote: string | null;
 };
 
 type EvaluationPayload = {
@@ -38,6 +39,8 @@ type RejectionReason =
   | "missing_criterion_response"
   | "invalid_rating_response"
   | "invalid_rating_value"
+  | "missing_observation_note"
+  | "invalid_observation_note"
   | "insufficient_observation"
   | "self_evaluation"
   | "rater_not_participating"
@@ -116,6 +119,32 @@ export function prepareEvaluationSubmission(
     return reject(422, "invalid_rating_value");
   }
 
+  const normalizedRatings = input.payload.ratings.map((rating) => ({
+    ...rating,
+    evidenceNote:
+      typeof rating.evidenceNote === "string"
+        ? rating.evidenceNote.trim()
+        : null,
+  }));
+  if (
+    normalizedRatings.some(
+      ({ responseStatus, evidenceNote }) =>
+        responseStatus === "not_observed" && !evidenceNote,
+    )
+  ) {
+    return reject(422, "missing_observation_note");
+  }
+  if (
+    normalizedRatings.some(
+      ({ responseStatus, evidenceNote }) =>
+        (responseStatus === "not_observed" &&
+          (evidenceNote as string).length < 8) ||
+        (responseStatus === "rated" && evidenceNote !== null),
+    )
+  ) {
+    return reject(422, "invalid_observation_note");
+  }
+
   if (
     input.payload.ratings.filter(
       ({ responseStatus }) => responseStatus === "rated",
@@ -151,7 +180,7 @@ export function prepareEvaluationSubmission(
       shiftId: input.payload.shiftId,
       raterMembershipId: input.actor.membershipId,
       subjectMembershipId: input.payload.subjectMembershipId,
-      ratings: input.payload.ratings.map((rating) => ({ ...rating })),
+      ratings: normalizedRatings,
     },
   };
 }

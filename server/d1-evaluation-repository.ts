@@ -24,6 +24,7 @@ type EvaluationPayload = {
     criterionId: string;
     responseStatus: "rated" | "not_observed";
     value: number | null;
+    evidenceNote: string | null;
   }>;
 };
 
@@ -305,8 +306,8 @@ export class D1EvaluationRepository implements EvaluationRepository {
         this.database
           .prepare(`
             INSERT INTO rating_observations (
-              id, submission_id, criterion_id, response_status, value, moderation_status
-            ) VALUES (?, ?, ?, ?, ?, 'not_required')
+              id, submission_id, criterion_id, response_status, value, evidence_note, moderation_status
+            ) VALUES (?, ?, ?, ?, ?, ?, 'not_required')
           `)
           .bind(
             observation.id,
@@ -314,6 +315,7 @@ export class D1EvaluationRepository implements EvaluationRepository {
             observation.criterionId,
             observation.responseStatus,
             observation.value,
+            observation.evidenceNote,
           ),
       ),
     ];

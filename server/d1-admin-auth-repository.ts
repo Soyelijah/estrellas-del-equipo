@@ -1,3 +1,5 @@
+import { carryForwardDailyScores } from "../domain/monthly-evaluation.ts";
+
 type PreparedStatementLike = {
   bind(...values: unknown[]): PreparedStatementLike;
   all<T>(): Promise<{ results: T[] }>;
@@ -280,7 +282,7 @@ export class D1AdminAuthRepository {
     let summary: Record<string, unknown> | null = null;
     if (period) {
       const periodId = String(period.id);
-      const [dailyRows, resultRows, criterionRows] = await Promise.all([
+      const [dailyRows, resultRows, criterionRows, subjectDailyRows] = await Promise.all([
         this.database.prepare(`
           SELECT substr(s.starts_at, 1, 10) AS serviceDate,
             COUNT(*) AS expectedSubmissions,
@@ -348,6 +350,32 @@ export class D1AdminAuthRepository {
           GROUP BY p.membership_id, c.id, c.name, c.created_at
           ORDER BY p.membership_id, c.created_at, c.id
         `).bind(periodId).all<{ membershipId: string; criterionId: string; name: string; score: number | null }>(),
+        this.database.prepare(`
+          SELECT p.membership_id AS membershipId,
+            substr(s.starts_at, 1, 10) AS serviceDate,
+            AVG(CASE WHEN ro.response_status = 'rated' THEN ro.value END) AS actualScore
+          FROM evaluation_participations p
+          JOIN shift_assignments subject_assignment
+            ON subject_assignment.membership_id = p.membership_id
+          JOIN shifts s
+            ON s.id = subject_assignment.shift_id
+            AND s.period_id = p.period_id
+            AND s.organization_id = ?
+            AND s.status = 'closed'
+          LEFT JOIN evaluation_submissions es
+            ON es.period_id = p.period_id
+            AND es.shift_id = s.id
+            AND es.subject_membership_id = p.membership_id
+            AND es.status <> 'voided'
+          LEFT JOIN rating_observations ro ON ro.submission_id = es.id
+          WHERE p.period_id = ? AND p.can_be_evaluated = 1
+          GROUP BY p.membership_id, substr(s.starts_at, 1, 10)
+          ORDER BY p.membership_id, serviceDate
+        `).bind(organizationId, periodId).all<{
+          membershipId: string;
+          serviceDate: string;
+          actualScore: number | null;
+        }>(),
       ]);
 
       const daily = dailyRows.results.map((row) => ({
@@ -365,13 +393,24 @@ export class D1AdminAuthRepository {
             name: criterion.name,
             score: criterion.score === null ? null : roundScore(Number(criterion.score)),
           }));
-        const observedScores = criteria.flatMap((criterion) => criterion.score === null ? [] : [criterion.score]);
+        const monthlyScores = carryForwardDailyScores(
+          subjectDailyRows.results
+            .filter((dailyScore) => dailyScore.membershipId === row.membershipId)
+            .map((dailyScore) => ({
+              serviceDate: dailyScore.serviceDate,
+              actualScore: dailyScore.actualScore === null ? null : Number(dailyScore.actualScore),
+            })),
+        );
         return {
           ...row,
           completedSubmissions: Number(row.completedSubmissions),
           independentRaters: Number(row.independentRaters),
           evaluatedDays: Number(row.evaluatedDays),
-          score: observedScores.length === 0 ? null : roundScore(observedScores.reduce((total, score) => total + score, 0) / observedScores.length),
+          score: monthlyScores.score,
+          actualScore: monthlyScores.actualScore,
+          estimatedDays: monthlyScores.estimatedDays,
+          unscoredDays: monthlyScores.unscoredDays,
+          dailyScores: monthlyScores.dailyScores,
           criteria,
         };
       });

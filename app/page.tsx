@@ -54,6 +54,9 @@ type EvaluationSummary = {
     displayName: string;
     jobTitle: JobTitle;
     score: number | null;
+    actualScore: number | null;
+    estimatedDays: number;
+    unscoredDays: number;
     evaluatedDays: number;
     independentRaters: number;
     completedSubmissions: number;
@@ -286,6 +289,10 @@ export default function Home() {
         "El mes ya estaba cerrado o no está disponible.",
       insufficient_observation:
         "Debes valorar al menos dos aspectos que sí observaste.",
+      missing_observation_note:
+        "Explica brevemente por qué no pudiste observar esa conducta.",
+      invalid_observation_note:
+        "La explicación debe tener entre 8 y 240 caracteres.",
       duplicate_submission: "Esta evaluación ya fue enviada.",
       missing_criterion_response:
         "Responde todos los aspectos antes de guardar.",
@@ -572,11 +579,15 @@ export default function Home() {
             criterionId: criterion.id,
             responseStatus: "not_observed",
             value: null,
+            evidenceNote: String(
+              data.get(`${criterion.id}:note`) ?? "",
+            ).trim(),
           }
         : {
             criterionId: criterion.id,
             responseStatus: "rated",
             value: Number(value),
+            evidenceNote: null,
           };
     });
     try {
@@ -1981,8 +1992,9 @@ function MonthlyEvaluationSummary({
           <p className="eyebrow">PROMEDIO DEL MES</p>
           <h2>Resultados reales y cumplimiento diario</h2>
           <span>
-            Los días sin respuesta quedan pendientes: no se inventan notas ni se
-            modifica el promedio del trabajador.
+            Los días sin respuesta siguen pendientes. Para el promedio mensual
+            se muestra aparte una estimación basada solo en días anteriores;
+            nunca cuenta como una evaluación enviada.
           </span>
         </div>
         <span
@@ -2068,6 +2080,19 @@ function MonthlyEvaluationSummary({
                   {result.completedSubmissions} formulario
                   {result.completedSubmissions === 1 ? "" : "s"}
                 </span>
+                {result.estimatedDays > 0 && (
+                  <span className="estimated-evidence">
+                    {result.estimatedDays} día
+                    {result.estimatedDays === 1 ? "" : "s"} estimado
+                    {result.estimatedDays === 1 ? "" : "s"}
+                  </span>
+                )}
+                {result.unscoredDays > 0 && (
+                  <span>
+                    {result.unscoredDays} día
+                    {result.unscoredDays === 1 ? "" : "s"} sin base previa
+                  </span>
+                )}
               </div>
               <div className="criteria-results">
                 {result.criteria.map((criterion) => (
@@ -2217,11 +2242,11 @@ function EvaluationDesk({
 }
 
 const ratingLabels = [
-  "Necesita apoyo",
-  "En desarrollo",
-  "Cumple",
-  "Muy buen nivel",
-  "Destaca",
+  "Incumplimiento grave o reiterado",
+  "Necesita mejorar frecuentemente",
+  "Cumple lo esperado",
+  "Desempeño muy bueno y constante",
+  "Desempeño ejemplar y eleva al equipo",
 ] as const;
 
 function StarRating({
@@ -2229,6 +2254,7 @@ function StarRating({
 }: {
   criterion: EvaluationWorkspace["criteria"][number];
 }) {
+  const [selection, setSelection] = useState("");
   return (
     <fieldset className="star-rating-card">
       <legend>
@@ -2250,6 +2276,7 @@ function StarRating({
                 value={value}
                 required
                 aria-label={`Calificar ${criterion.name} con ${value} estrellas`}
+                onChange={() => setSelection(String(value))}
               />
               <span aria-hidden="true">★</span>
               <small>{value}</small>
@@ -2258,14 +2285,38 @@ function StarRating({
         })}
       </div>
       <div className="rating-anchors" aria-hidden="true">
-        <span>Necesita apoyo</span>
-        <span>Cumple</span>
-        <span>Destaca</span>
+        <span>1 · Incumplimiento</span>
+        <span>3 · Cumple</span>
+        <span>5 · Ejemplar</span>
       </div>
+      {selection && selection !== "not_observed" && (
+        <p className="selected-rating" role="status">
+          {selection} · {ratingLabels[Number(selection) - 1]}
+        </p>
+      )}
       <label className="not-observed-choice">
-        <input type="radio" name={criterion.id} value="not_observed" />
-        <span>No tuve oportunidad de observarlo</span>
+        <input
+          type="radio"
+          name={criterion.id}
+          value="not_observed"
+          onChange={() => setSelection("not_observed")}
+        />
+        <span>No pude observarlo</span>
       </label>
+      {selection === "not_observed" && (
+        <label className="observation-note">
+          <span>Explica brevemente por qué</span>
+          <textarea
+            name={`${criterion.id}:note`}
+            required
+            minLength={8}
+            maxLength={240}
+            rows={3}
+            placeholder="Ej.: No compartimos esa tarea durante este turno."
+          />
+          <small>No suma ni resta en la calificación.</small>
+        </label>
+      )}
     </fieldset>
   );
 }

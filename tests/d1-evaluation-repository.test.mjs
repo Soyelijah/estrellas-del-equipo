@@ -231,18 +231,21 @@ test("opens a real cycle, records a shared shift, and applies the cashier partic
   assert.deepEqual(await repository.createEvaluationShift({
     id: "shift-real", auditId: "audit-shift", organizationId: "org-1", createdByMembershipId: "membership-admin", section: "Salón", startsAt: "2026-08-22T18:00:00.000Z", endsAt: "2026-08-23T02:00:00.000Z", membershipIds: ["membership-waiter", "membership-cashier"], now: "2026-08-23T03:00:00.000Z",
   }), { created: true });
+  assert.deepEqual(await repository.createEvaluationShift({
+    id: "shift-missing", auditId: "audit-shift-missing", organizationId: "org-1", createdByMembershipId: "membership-admin", section: "Salón", startsAt: "2026-08-23T18:00:00.000Z", endsAt: "2026-08-24T02:00:00.000Z", membershipIds: ["membership-waiter", "membership-cashier"], now: "2026-08-24T03:00:00.000Z",
+  }), { created: true });
 
   const participations = database.prepare("SELECT membership_id, can_evaluate, can_be_evaluated FROM evaluation_participations ORDER BY membership_id").all().map((row) => ({ ...row }));
   assert.deepEqual(participations, [
     { membership_id: "membership-cashier", can_evaluate: 1, can_be_evaluated: 0 },
     { membership_id: "membership-waiter", can_evaluate: 1, can_be_evaluated: 1 },
   ]);
-  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM shift_assignments WHERE shift_id = 'shift-real'").get().count, 2);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM shift_assignments").get().count, 4);
 
   const evaluationRepository = new D1EvaluationRepository(new SQLiteD1Database(database));
   const cashierWorkspace = await evaluationRepository.loadWorkspace({ userId: "worker-cashier", membershipId: "membership-cashier", organizationId: "org-1", role: "worker" }, "2026-08-23T03:00:00.000Z");
   const waiterWorkspace = await evaluationRepository.loadWorkspace({ userId: "worker-waiter", membershipId: "membership-waiter", organizationId: "org-1", role: "worker" }, "2026-08-23T03:00:00.000Z");
-  assert.deepEqual(cashierWorkspace.assignments.map((assignment) => assignment.subjectDisplayName), ["Garzón"]);
+  assert.deepEqual(cashierWorkspace.assignments.map((assignment) => assignment.subjectDisplayName), ["Garzón", "Garzón"]);
   assert.deepEqual(waiterWorkspace.assignments, []);
 
   database.exec(`
@@ -261,14 +264,24 @@ test("opens a real cycle, records a shared shift, and applies the cashier partic
   assert.deepEqual(operations.summary, {
     periodId: "period-real",
     completedSubmissions: 1,
-    expectedSubmissions: 1,
-    completionPercent: 100,
-    daily: [{ serviceDate: "2026-08-22", completedSubmissions: 1, expectedSubmissions: 1 }],
+    expectedSubmissions: 2,
+    completionPercent: 50,
+    daily: [
+      { serviceDate: "2026-08-22", completedSubmissions: 1, expectedSubmissions: 1 },
+      { serviceDate: "2026-08-23", completedSubmissions: 0, expectedSubmissions: 1 },
+    ],
     results: [{
       membershipId: "membership-waiter",
       displayName: "Garzón",
       jobTitle: "waiter",
       score: 4.5,
+      actualScore: 4.5,
+      estimatedDays: 1,
+      unscoredDays: 0,
+      dailyScores: [
+        { serviceDate: "2026-08-22", actualScore: 4.5, score: 4.5, source: "actual" },
+        { serviceDate: "2026-08-23", actualScore: null, score: 4.5, source: "estimated_previous_average" },
+      ],
       evaluatedDays: 1,
       independentRaters: 1,
       completedSubmissions: 1,
@@ -361,8 +374,8 @@ test("stores a submission and all observations atomically, then rejects its dupl
       submittedAt: "2026-08-15T22:00:00.000Z",
     },
     observations: [
-      { id: "observation-1", criterionId: "criterion-teamwork", responseStatus: "rated", value: 5 },
-      { id: "observation-2", criterionId: "criterion-knowledge", responseStatus: "not_observed", value: null },
+      { id: "observation-1", criterionId: "criterion-teamwork", responseStatus: "rated", value: 5, evidenceNote: null },
+      { id: "observation-2", criterionId: "criterion-knowledge", responseStatus: "not_observed", value: null, evidenceNote: "No compartimos esa tarea durante el turno." },
     ],
   };
 
@@ -372,8 +385,8 @@ test("stores a submission and all observations atomically, then rejects its dupl
     2,
   );
   assert.deepEqual(
-    { ...database.prepare("SELECT response_status, value FROM rating_observations WHERE id = 'observation-2'").get() },
-    { response_status: "not_observed", value: null },
+    { ...database.prepare("SELECT response_status, value, evidence_note FROM rating_observations WHERE id = 'observation-2'").get() },
+    { response_status: "not_observed", value: null, evidence_note: "No compartimos esa tarea durante el turno." },
   );
   assert.deepEqual(
     await repository.saveSubmission({

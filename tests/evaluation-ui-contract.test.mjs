@@ -12,6 +12,22 @@ test("uses an accessible five-star control instead of a score select", () => {
     /aria-label={`Calificar \${criterion\.name} con \${value} estrellas`}/,
   );
   assert.match(page, /className="rating-star"/);
+  assert.match(page, /Incumplimiento grave o reiterado/);
+  assert.match(page, /Necesita mejorar frecuentemente/);
+  assert.match(page, /Cumple lo esperado/);
+  assert.match(page, /Desempeño muy bueno y constante/);
+  assert.match(page, /Desempeño ejemplar y eleva al equipo/);
+  assert.match(page, /No pude observarlo/);
+  assert.match(page, /name={`\${criterion\.id}:note`}/);
+  assert.match(page, /minLength=\{8\}/);
+});
+
+test("distinguishes missing submissions from monthly carry-forward estimates", () => {
+  assert.match(page, /Los días sin respuesta siguen pendientes/);
+  assert.match(page, /estimación basada solo en días anteriores/);
+  assert.match(page, /nunca cuenta como una evaluación enviada/);
+  assert.match(page, /result\.estimatedDays > 0/);
+  assert.match(page, /Requiere tu aprobación/);
 });
 
 test("explains the monthly cycle and the daily shift before asking for data", () => {

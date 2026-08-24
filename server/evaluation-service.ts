@@ -77,6 +77,7 @@ type SubmissionRecord = {
     criterionId: string;
     responseStatus: "rated" | "not_observed";
     value: number | null;
+    evidenceNote: string | null;
   }>;
 };
 
@@ -194,6 +195,7 @@ export async function submitEvaluation(
       criterionId: rating.criterionId,
       responseStatus: rating.responseStatus,
       value: rating.value,
+      evidenceNote: rating.evidenceNote,
     })),
   });
 
@@ -221,7 +223,11 @@ function parseEvaluationPayload(body: unknown): EvaluationPayload | null {
       !isRecord(rating) ||
       !isBoundedIdentifier(rating.criterionId) ||
       (rating.responseStatus !== "rated" && rating.responseStatus !== "not_observed") ||
-      (typeof rating.value !== "number" && rating.value !== null)
+      (typeof rating.value !== "number" && rating.value !== null) ||
+      (typeof rating.evidenceNote !== "string" &&
+        rating.evidenceNote !== null &&
+        rating.evidenceNote !== undefined) ||
+      (typeof rating.evidenceNote === "string" && rating.evidenceNote.length > 240)
     ) {
       return null;
     }
@@ -229,6 +235,10 @@ function parseEvaluationPayload(body: unknown): EvaluationPayload | null {
       criterionId: rating.criterionId,
       responseStatus: rating.responseStatus,
       value: rating.value,
+      evidenceNote:
+        typeof rating.evidenceNote === "string"
+          ? rating.evidenceNote.trim()
+          : null,
     };
   });
   if (ratings.some((rating) => rating === null)) return null;

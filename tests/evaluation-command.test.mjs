@@ -40,8 +40,8 @@ test("derives the rater from the authorized actor instead of request data", () =
       raterMembershipId: "membership-rater",
       subjectMembershipId: "membership-subject",
       ratings: [
-        { criterionId: "teamwork", responseStatus: "rated", value: 5 },
-        { criterionId: "knowledge", responseStatus: "rated", value: 4 },
+        { criterionId: "teamwork", responseStatus: "rated", value: 5, evidenceNote: null },
+        { criterionId: "knowledge", responseStatus: "rated", value: 4, evidenceNote: null },
       ],
     },
   });
@@ -144,9 +144,9 @@ test("accepts explicit no-observation responses without turning them into scores
       ...validInput.payload,
       ratings: [
         { criterionId: "teamwork", responseStatus: "rated", value: 5 },
-        { criterionId: "knowledge", responseStatus: "not_observed", value: null },
+        { criterionId: "knowledge", responseStatus: "not_observed", value: null, evidenceNote: "No compartimos esa tarea durante el turno." },
         { criterionId: "accuracy", responseStatus: "rated", value: 4 },
-        { criterionId: "explanation", responseStatus: "not_observed", value: null },
+        { criterionId: "explanation", responseStatus: "not_observed", value: null, evidenceNote: "No estuve presente cuando explicó el producto." },
       ],
     },
     evidence: {
@@ -160,7 +160,44 @@ test("accepts explicit no-observation responses without turning them into scores
     criterionId: "knowledge",
     responseStatus: "not_observed",
     value: null,
+    evidenceNote: "No compartimos esa tarea durante el turno.",
   });
+});
+
+test("requires a useful explanation for every no-observation response", () => {
+  const missing = prepareEvaluationSubmission({
+    ...validInput,
+    payload: {
+      ...validInput.payload,
+      ratings: [
+        { criterionId: "teamwork", responseStatus: "rated", value: 5 },
+        { criterionId: "knowledge", responseStatus: "not_observed", value: null, evidenceNote: "" },
+        { criterionId: "accuracy", responseStatus: "rated", value: 4 },
+      ],
+    },
+    evidence: {
+      ...validInput.evidence,
+      validCriterionIds: ["teamwork", "knowledge", "accuracy"],
+    },
+  });
+  const tooShort = prepareEvaluationSubmission({
+    ...validInput,
+    payload: {
+      ...validInput.payload,
+      ratings: [
+        { criterionId: "teamwork", responseStatus: "rated", value: 5 },
+        { criterionId: "knowledge", responseStatus: "not_observed", value: null, evidenceNote: "No vi" },
+        { criterionId: "accuracy", responseStatus: "rated", value: 4 },
+      ],
+    },
+    evidence: {
+      ...validInput.evidence,
+      validCriterionIds: ["teamwork", "knowledge", "accuracy"],
+    },
+  });
+
+  assert.equal(missing.reason, "missing_observation_note");
+  assert.equal(tooShort.reason, "invalid_observation_note");
 });
 
 test("rejects incomplete, contradictory, or insufficiently observed responses", () => {
@@ -189,7 +226,7 @@ test("rejects incomplete, contradictory, or insufficiently observed responses", 
       ...validInput.payload,
       ratings: [
         { criterionId: "teamwork", responseStatus: "rated", value: 5 },
-        { criterionId: "knowledge", responseStatus: "not_observed", value: null },
+        { criterionId: "knowledge", responseStatus: "not_observed", value: null, evidenceNote: "No compartimos esa tarea durante el turno." },
       ],
     },
   });
