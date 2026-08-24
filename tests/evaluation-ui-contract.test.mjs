@@ -31,3 +31,9 @@ test("makes permanent cycle removal explicit and preserves account expectations"
   assert.match(page, /No elimina personas/);
   assert.match(page, /La acción queda registrada/);
 });
+
+test("hides worker result cards until a real evaluation exists", () => {
+  assert.match(page, /result\.completedSubmissions > 0/);
+  assert.match(page, /evaluatedResults\.length > 0/);
+  assert.match(page, /evaluatedResults\.map/);
+});

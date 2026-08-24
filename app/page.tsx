@@ -1976,6 +1976,9 @@ function MonthlyEvaluationSummary({
 }) {
   if (!summary) return null;
   const completion = evaluationCompletionState(summary);
+  const evaluatedResults = summary.results.filter(
+    (result) => result.completedSubmissions > 0,
+  );
   return (
     <section className="monthly-summary">
       <div className="section-heading">
@@ -2037,14 +2040,9 @@ function MonthlyEvaluationSummary({
           )}
         </div>
       </div>
-      {summary.results.length === 0 ? (
-        <Empty
-          title="Aún no hay resultados"
-          text="Los promedios aparecerán cuando los compañeros completen evaluaciones reales."
-        />
-      ) : (
+      {evaluatedResults.length > 0 && (
         <div className="result-grid">
-          {summary.results.map((result) => (
+          {evaluatedResults.map((result) => (
             <article className="result-card" key={result.membershipId}>
               <header>
                 <div className="worker-identity">
