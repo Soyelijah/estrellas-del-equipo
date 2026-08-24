@@ -3,15 +3,16 @@ import type { SessionActor } from "./admin-auth-service.ts";
 type EvaluationAdminRepository = {
   openEvaluationCycle(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
   createEvaluationShift(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
+  closeEvaluationCycle(record: Record<string, unknown>): Promise<{ updated: boolean }>;
 };
 
 const DEFAULT_CRITERIA = [
-  { code: "menu_knowledge", name: "Conocimiento de la carta", description: "Reconoce comidas, tragos, vinos, ingredientes y recomendaciones.", category: "knowledge", weightBasisPoints: 1800 },
-  { code: "product_explanation", name: "Explicación al cliente", description: "Explica cada producto con claridad, seguridad y fluidez.", category: "communication", weightBasisPoints: 1700 },
-  { code: "command_accuracy", name: "Precisión al comandar", description: "Registra pedidos completos y evita errores que afecten el servicio.", category: "accuracy", weightBasisPoints: 2000 },
-  { code: "teamwork", name: "Trabajo en equipo", description: "Coordina, apoya y se comunica durante momentos de presión.", category: "teamwork", weightBasisPoints: 1800 },
-  { code: "service_attitude", name: "Atención y actitud", description: "Mantiene trato profesional, iniciativa y orientación al cliente.", category: "service", weightBasisPoints: 1500 },
-  { code: "reliability", name: "Responsabilidad", description: "Cumple acuerdos, mantiene orden y responde por sus tareas.", category: "reliability", weightBasisPoints: 1200 },
+  { code: "discipline", name: "Disciplina, puntualidad y presentación", description: "Llega a tiempo, cumple las normas y mantiene una presentación adecuada durante el turno.", category: "discipline", weightBasisPoints: 1667 },
+  { code: "operational_responsibility", name: "Responsabilidad y precisión operativa", description: "Cumple sus tareas, confirma pedidos y se hace responsable de los errores operativos.", category: "reliability", weightBasisPoints: 1667 },
+  { code: "customer_experience", name: "Atención y experiencia del cliente", description: "Escucha, explica con claridad y mantiene un servicio amable y profesional.", category: "service", weightBasisPoints: 1667 },
+  { code: "menu_knowledge", name: "Conocimiento de carta y recomendación", description: "Conoce comidas, ingredientes, alérgenos, tragos y vinos, y recomienda sin inventar información.", category: "knowledge", weightBasisPoints: 1667 },
+  { code: "teamwork", name: "Comunicación, compañerismo y trabajo en equipo", description: "Informa a tiempo, coordina con salón, barra y caja, y apoya al equipo bajo presión.", category: "teamwork", weightBasisPoints: 1666 },
+  { code: "continuous_improvement", name: "Autocrítica, aprendizaje y mejora continua", description: "Reconoce errores, acepta correcciones y demuestra avances sin repetir las mismas fallas.", category: "improvement", weightBasisPoints: 1666 },
 ] as const;
 
 export async function openEvaluationCycle(
@@ -80,6 +81,28 @@ export async function registerEvaluationShift(
     return { ok: false as const, status, error: result.reason };
   }
   return { ok: true as const, status: 201 as const };
+}
+
+export async function closeEvaluationCycle(
+  input: unknown,
+  actor: SessionActor,
+  dependencies: { repository: EvaluationAdminRepository; createId: () => string; now: string; periodId: string },
+) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403 as const, error: "admin_required" };
+  const periodId = boundedText(dependencies.periodId, 1, 128);
+  const reason = isRecord(input) ? boundedText(input.reason, 4, 240) : null;
+  if (!periodId || !reason) return { ok: false as const, status: 422 as const, error: "invalid_cycle_close" };
+  const result = await dependencies.repository.closeEvaluationCycle({
+    periodId,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    auditId: dependencies.createId(),
+    reason,
+    now: dependencies.now,
+  });
+  return result.updated
+    ? { ok: true as const, status: 200 as const }
+    : { ok: false as const, status: 404 as const, error: "evaluation_cycle_not_found" };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

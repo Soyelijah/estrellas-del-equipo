@@ -87,8 +87,9 @@ export interface EvaluationRepository {
   findSubmissionEvidence(
     actor: AuthorizedActor,
     payload: EvaluationPayload,
+    now: string,
   ): Promise<SubmissionEvidence | null>;
-  loadWorkspace(actor: AuthorizedActor): Promise<EvaluationWorkspace>;
+  loadWorkspace(actor: AuthorizedActor, now: string): Promise<EvaluationWorkspace>;
   saveSubmission(
     record: SubmissionRecord,
   ): Promise<
@@ -115,7 +116,7 @@ export async function loadEvaluationWorkspace(
   });
   if (!authorization.ok) return failure(authorization.status, authorization.reason);
   if (authorization.actor.role === "admin") return failure(403, "worker_required");
-  return { ok: true, status: 200, workspace: await dependencies.repository.loadWorkspace(authorization.actor) };
+  return { ok: true, status: 200, workspace: await dependencies.repository.loadWorkspace(authorization.actor, input.now) };
 }
 
 type SubmitEvaluationInput = {
@@ -162,6 +163,7 @@ export async function submitEvaluation(
   const evidence = await dependencies.repository.findSubmissionEvidence(
     authorization.actor,
     payload,
+    input.now,
   );
   if (!evidence) {
     return failure(404, "evaluation_context_not_found");

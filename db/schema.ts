@@ -175,6 +175,7 @@ export const evaluationParticipations = sqliteTable("evaluation_participations",
 export const shifts = sqliteTable("shifts", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  periodId: text("period_id").references(() => evaluationPeriods.id, { onDelete: "restrict" }),
   startsAt: text("starts_at").notNull(),
   endsAt: text("ends_at").notNull(),
   section: text("section").notNull(),
@@ -184,6 +185,7 @@ export const shifts = sqliteTable("shifts", {
   check("shifts_dates_check", sql`${table.endsAt} > ${table.startsAt}`),
   check("shifts_status_check", sql`${table.status} IN ('scheduled', 'open', 'closed', 'cancelled')`),
   index("idx_shifts_organization_starts_at").on(table.organizationId, table.startsAt),
+  index("idx_shifts_period_starts_at").on(table.periodId, table.startsAt),
 ]);
 
 export const shiftAssignments = sqliteTable("shift_assignments", {

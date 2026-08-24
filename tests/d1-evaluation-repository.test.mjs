@@ -240,10 +240,53 @@ test("opens a real cycle, records a shared shift, and applies the cashier partic
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM shift_assignments WHERE shift_id = 'shift-real'").get().count, 2);
 
   const evaluationRepository = new D1EvaluationRepository(new SQLiteD1Database(database));
-  const cashierWorkspace = await evaluationRepository.loadWorkspace({ userId: "worker-cashier", membershipId: "membership-cashier", organizationId: "org-1", role: "worker" });
-  const waiterWorkspace = await evaluationRepository.loadWorkspace({ userId: "worker-waiter", membershipId: "membership-waiter", organizationId: "org-1", role: "worker" });
+  const cashierWorkspace = await evaluationRepository.loadWorkspace({ userId: "worker-cashier", membershipId: "membership-cashier", organizationId: "org-1", role: "worker" }, "2026-08-23T03:00:00.000Z");
+  const waiterWorkspace = await evaluationRepository.loadWorkspace({ userId: "worker-waiter", membershipId: "membership-waiter", organizationId: "org-1", role: "worker" }, "2026-08-23T03:00:00.000Z");
   assert.deepEqual(cashierWorkspace.assignments.map((assignment) => assignment.subjectDisplayName), ["Garzón"]);
   assert.deepEqual(waiterWorkspace.assignments, []);
+
+  database.exec(`
+    INSERT INTO evaluation_submissions (
+      id, organization_id, period_id, shift_id, rater_membership_id, subject_membership_id, status, submitted_at
+    ) VALUES (
+      'submission-real', 'org-1', 'period-real', 'shift-real', 'membership-cashier', 'membership-waiter', 'submitted', '2026-08-23T03:10:00.000Z'
+    );
+    INSERT INTO rating_observations (id, submission_id, criterion_id, response_status, value, moderation_status)
+    VALUES
+      ('observation-a', 'submission-real', 'criterion-a', 'rated', 5, 'not_required'),
+      ('observation-b', 'submission-real', 'criterion-b', 'rated', 4, 'not_required');
+  `);
+
+  const operations = await repository.getEvaluationOperations("org-1");
+  assert.deepEqual(operations.summary, {
+    periodId: "period-real",
+    completedSubmissions: 1,
+    expectedSubmissions: 1,
+    completionPercent: 100,
+    daily: [{ serviceDate: "2026-08-22", completedSubmissions: 1, expectedSubmissions: 1 }],
+    results: [{
+      membershipId: "membership-waiter",
+      displayName: "Garzón",
+      jobTitle: "waiter",
+      score: 4.5,
+      evaluatedDays: 1,
+      independentRaters: 1,
+      completedSubmissions: 1,
+      criteria: [
+        { criterionId: "criterion-a", name: "Equipo", score: 5 },
+        { criterionId: "criterion-b", name: "Carta", score: 4 },
+      ],
+    }],
+  });
+
+  assert.deepEqual(await repository.closeEvaluationCycle({
+    periodId: "period-real", organizationId: "org-1", actorMembershipId: "membership-admin",
+    auditId: "audit-close", reason: "Cierre mensual revisado", now: "2026-09-24T00:00:00.000Z",
+  }), { updated: true });
+  assert.equal(database.prepare("SELECT status FROM evaluation_periods WHERE id = 'period-real'").get().status, "under_review");
+  assert.deepEqual({ ...database.prepare("SELECT action, reason FROM audit_events WHERE id = 'audit-close'").get() }, { action: "evaluation.cycle_closed", reason: "Cierre mensual revisado" });
+  assert.equal((await evaluationRepository.loadWorkspace({ userId: "worker-cashier", membershipId: "membership-cashier", organizationId: "org-1", role: "worker" }, "2026-08-23T03:00:00.000Z")).period, null);
+
 });
 
 test("loads the active membership bound to the authenticated subject", async () => {
@@ -273,6 +316,7 @@ test("derives evaluation evidence from period participation and shared shifts", 
       subjectMembershipId: "membership-subject",
       ratings: [],
     },
+    "2026-08-15T20:00:00.000Z",
   );
 
   assert.deepEqual(evidence, {
@@ -284,6 +328,13 @@ test("derives evaluation evidence from period participation and shared shifts", 
     subjectCanBeEvaluated: true,
     validCriterionIds: ["criterion-knowledge", "criterion-teamwork"],
   });
+
+  const afterMonth = await repository.findSubmissionEvidence(
+    { userId: "user-rater", membershipId: "membership-rater", organizationId: "restaurant-1", role: "worker" },
+    { periodId: "period-1", shiftId: "shift-1", subjectMembershipId: "membership-subject", ratings: [] },
+    "2026-09-01T00:00:00.000Z",
+  );
+  assert.equal(afterMonth.periodOpen, false);
 });
 
 test("stores a submission and all observations atomically, then rejects its duplicate", async () => {

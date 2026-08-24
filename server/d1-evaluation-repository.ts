@@ -126,16 +126,17 @@ export class D1EvaluationRepository implements EvaluationRepository {
     };
   }
 
-  async loadWorkspace(actor: AuthorizedActor) {
+  async loadWorkspace(actor: AuthorizedActor, now: string) {
     const period = await this.database.prepare(`
       SELECT ep.id, ep.name, ep.ends_at, ep.policy_version_id
       FROM evaluation_periods ep
       JOIN evaluation_participations participation
         ON participation.period_id = ep.id AND participation.membership_id = ?
       WHERE ep.organization_id = ? AND ep.status = 'open' AND participation.can_evaluate = 1
+        AND ep.starts_at <= ? AND ep.ends_at >= ?
       ORDER BY ep.starts_at DESC
       LIMIT 1
-    `).bind(actor.membershipId, actor.organizationId).first<WorkspacePeriodRow>();
+    `).bind(actor.membershipId, actor.organizationId, now, now).first<WorkspacePeriodRow>();
 
     if (!period) return { period: null, criteria: [], assignments: [] };
 
@@ -203,12 +204,13 @@ export class D1EvaluationRepository implements EvaluationRepository {
   async findSubmissionEvidence(
     actor: AuthorizedActor,
     payload: EvaluationPayload,
+    now: string,
   ): Promise<SubmissionEvidence | null> {
     const row = await this.database
       .prepare(`
         SELECT
           sm.organization_id AS subject_organization_id,
-          CASE WHEN ep.status = 'open' AND ep.organization_id = ? THEN 1 ELSE 0 END AS period_open,
+          CASE WHEN ep.status = 'open' AND ep.organization_id = ? AND ep.starts_at <= ? AND ep.ends_at >= ? THEN 1 ELSE 0 END AS period_open,
           COALESCE(rp.can_evaluate, 0) AS rater_can_evaluate,
           COALESCE(sp.can_be_evaluated, 0) AS subject_can_be_evaluated,
           EXISTS (
@@ -241,6 +243,8 @@ export class D1EvaluationRepository implements EvaluationRepository {
       `)
       .bind(
         actor.organizationId,
+        now,
+        now,
         payload.shiftId,
         actor.organizationId,
         actor.membershipId,

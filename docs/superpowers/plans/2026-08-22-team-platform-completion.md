@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-22-team-platform-completion-design.md`
 
+**Estado actualizado (2026-08-24):** Las tareas 1–6 fueron implementadas, verificadas, respaldadas y publicadas en `equipo.zgamersa.com`. Sus casillas se conservan como registro del plan original. La continuación funcional se documenta en la tarea 7.
+
 ## Global Constraints
 
 - Use TDD for every behavior change and observe the intended failure before production edits.
@@ -93,3 +95,20 @@
 - [ ] Attach `equipo.zgamersa.com`, apply the returned DNS validation/routing records through the authorized DNS surface, and wait for active TLS.
 - [ ] Verify the live root, auth status, unauthenticated mutation rejection, custom hostname, certificate, and absence of placeholder workers.
 - [ ] Report the production URL and any owner-only recovery material location without printing its contents.
+
+### Task 7: Daily evaluations and administrator-approved monthly close
+
+**Files:** `server/evaluation-admin-service.ts`, `server/evaluation-service.ts`, `server/d1-admin-auth-repository.ts`, `server/d1-evaluation-repository.ts`, `server/admin-auth-http.ts`, `db/schema.ts`, `drizzle/0008_evaluation_shift_period.sql`, `app/page.tsx`, `app/view-model.ts`, `app/globals.css`, and their tests.
+
+**Interfaces:** Six equally weighted dining-room criteria; daily shared-shift assignments; real monthly aggregates; completion tracking without synthetic scores; administrator-only audited close; no automatic tip-factor mutation.
+
+- [x] Write failing tests for the six agreed criteria with equal total weight.
+- [x] Implement the agreed criteria and verify the targeted HTTP suite.
+- [x] Write a failing SQLite-backed test for monthly results and daily completion.
+- [x] Bind every shift to its evaluation period with a reversible migration.
+- [x] Aggregate each criterion equally, preserve missing days as pending, and expose results only to the administrator.
+- [x] Add an administrator dashboard with monthly score, criterion detail, evidence counts, and daily completion.
+- [x] Add an administrator-only audited monthly close that blocks later evaluations.
+- [x] Enforce the period start/end boundary server-side.
+- [x] Run the complete test, lint, migration, security, artifact, and live smoke gates.
+- [ ] Commit, push, save, deploy, and verify the exact release at `equipo.zgamersa.com`.

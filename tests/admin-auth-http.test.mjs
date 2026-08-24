@@ -31,6 +31,7 @@ function dependencies(overrides = {}) {
       async getEvaluationOperations() { return { period: null, shifts: [], members: [] }; },
       async openEvaluationCycle() { return { created: true }; },
       async createEvaluationShift() { return { created: true }; },
+      async closeEvaluationCycle() { return { updated: true }; },
       ...repositoryOverrides,
     },
     createId: (() => { let id = 0; return () => `id-${++id}`; })(),
@@ -225,14 +226,27 @@ test("opens an evaluation cycle and registers a completed shared shift", async (
     async findSessionActor() { return actor; },
     async openEvaluationCycle(record) { calls.push({ type: "cycle", record }); return { created: true }; },
     async createEvaluationShift(record) { calls.push({ type: "shift", record }); return { created: true }; },
+    async closeEvaluationCycle(record) { calls.push({ type: "close", record }); return { updated: true }; },
   };
   const headers = { cookie: "estrellas_session=private-cookie-token" };
   const cycle = await handleAdminAuthRequest(mutation("/api/admin/evaluation-cycles", { name: "Ciclo agosto", startsAt: "2026-08-23T00:00:00.000Z", endsAt: "2026-09-23T23:59:59.000Z" }, headers), dependencies({ repository }));
   const shift = await handleAdminAuthRequest(mutation("/api/admin/evaluation-shifts", { section: "Salón principal", startsAt: "2026-08-22T18:00:00.000Z", endsAt: "2026-08-23T02:00:00.000Z", membershipIds: ["m-worker-1", "m-worker-2"] }, headers), dependencies({ repository }));
+  const close = await handleAdminAuthRequest(mutation("/api/admin/evaluation-cycles/period-1/close", { reason: "Cierre mensual revisado" }, headers), dependencies({ repository }));
 
-  assert.deepEqual([cycle.status, shift.status], [201, 201]);
+  assert.deepEqual([cycle.status, shift.status, close.status], [201, 201, 200]);
   assert.equal(calls[0].record.organizationId, "o1");
   assert.equal(calls[0].record.createdByMembershipId, "m-admin");
   assert.equal(calls[0].record.criteria.length, 6);
+  assert.deepEqual(calls[0].record.criteria.map(({ code, name, weightBasisPoints }) => ({ code, name, weightBasisPoints })), [
+    { code: "discipline", name: "Disciplina, puntualidad y presentación", weightBasisPoints: 1667 },
+    { code: "operational_responsibility", name: "Responsabilidad y precisión operativa", weightBasisPoints: 1667 },
+    { code: "customer_experience", name: "Atención y experiencia del cliente", weightBasisPoints: 1667 },
+    { code: "menu_knowledge", name: "Conocimiento de carta y recomendación", weightBasisPoints: 1667 },
+    { code: "teamwork", name: "Comunicación, compañerismo y trabajo en equipo", weightBasisPoints: 1666 },
+    { code: "continuous_improvement", name: "Autocrítica, aprendizaje y mejora continua", weightBasisPoints: 1666 },
+  ]);
+  assert.equal(calls[0].record.criteria.reduce((total, criterion) => total + criterion.weightBasisPoints, 0), 10_000);
   assert.deepEqual(calls[1].record.membershipIds, ["m-worker-1", "m-worker-2"]);
+  assert.equal(calls[2].type, "close");
+  assert.deepEqual({ ...calls[2].record, auditId: "bounded-generated-id" }, { periodId: "period-1", organizationId: "o1", actorMembershipId: "m-admin", auditId: "bounded-generated-id", reason: "Cierre mensual revisado", now: "2026-08-22T12:00:00.000Z" });
 });

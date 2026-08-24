@@ -26,6 +26,10 @@ function uniqueConflict(error: unknown): boolean {
   return error instanceof Error && /UNIQUE constraint failed|constraint failed/i.test(error.message);
 }
 
+function roundScore(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 export class D1AdminAuthRepository {
   private readonly database: D1DatabaseLike;
 
@@ -243,14 +247,15 @@ export class D1AdminAuthRepository {
   }
 
   async getEvaluationOperations(organizationId: string) {
-    const [period, members, shifts] = await Promise.all([
-      this.database.prepare(`
-        SELECT ep.id, ep.name, ep.starts_at AS startsAt, ep.ends_at AS endsAt, ep.status,
-          (SELECT COUNT(*) FROM evaluation_submissions es WHERE es.period_id = ep.id AND es.status <> 'voided') AS submissionCount
-        FROM evaluation_periods ep
-        WHERE ep.organization_id = ? AND ep.status = 'open'
-        ORDER BY ep.starts_at DESC LIMIT 1
-      `).bind(organizationId).first<Record<string, unknown>>(),
+    const period = await this.database.prepare(`
+      SELECT ep.id, ep.name, ep.starts_at AS startsAt, ep.ends_at AS endsAt, ep.status,
+        (SELECT COUNT(*) FROM evaluation_submissions es WHERE es.period_id = ep.id AND es.status <> 'voided') AS submissionCount
+      FROM evaluation_periods ep
+      WHERE ep.organization_id = ? AND ep.status IN ('open', 'under_review', 'published')
+      ORDER BY CASE ep.status WHEN 'open' THEN 0 WHEN 'under_review' THEN 1 ELSE 2 END, ep.starts_at DESC LIMIT 1
+    `).bind(organizationId).first<Record<string, unknown>>();
+
+    const [members, shifts] = await Promise.all([
       this.database.prepare(`
         SELECT m.id AS membershipId, u.display_name AS displayName, m.job_title AS jobTitle, u.status,
           CASE WHEN u.status = 'active' THEN 1 ELSE 0 END AS canEvaluate,
@@ -271,10 +276,119 @@ export class D1AdminAuthRepository {
         LIMIT 20
       `).bind(organizationId).all<Record<string, unknown>>(),
     ]);
+
+    let summary: Record<string, unknown> | null = null;
+    if (period) {
+      const periodId = String(period.id);
+      const [dailyRows, resultRows, criterionRows] = await Promise.all([
+        this.database.prepare(`
+          SELECT substr(s.starts_at, 1, 10) AS serviceDate,
+            COUNT(*) AS expectedSubmissions,
+            SUM(CASE WHEN es.id IS NULL THEN 0 ELSE 1 END) AS completedSubmissions
+          FROM shifts s
+          JOIN shift_assignments rater_assignment ON rater_assignment.shift_id = s.id
+          JOIN evaluation_participations rater_participation
+            ON rater_participation.period_id = ?
+            AND rater_participation.membership_id = rater_assignment.membership_id
+            AND rater_participation.can_evaluate = 1
+          JOIN shift_assignments subject_assignment
+            ON subject_assignment.shift_id = s.id
+            AND subject_assignment.membership_id <> rater_assignment.membership_id
+          JOIN evaluation_participations subject_participation
+            ON subject_participation.period_id = ?
+            AND subject_participation.membership_id = subject_assignment.membership_id
+            AND subject_participation.can_be_evaluated = 1
+          LEFT JOIN evaluation_submissions es
+            ON es.period_id = ?
+            AND es.shift_id = s.id
+            AND es.rater_membership_id = rater_assignment.membership_id
+            AND es.subject_membership_id = subject_assignment.membership_id
+            AND es.status <> 'voided'
+          WHERE s.organization_id = ? AND s.period_id = ? AND s.status = 'closed'
+          GROUP BY substr(s.starts_at, 1, 10)
+          ORDER BY serviceDate
+        `).bind(periodId, periodId, periodId, organizationId, periodId).all<{
+          serviceDate: string;
+          expectedSubmissions: number;
+          completedSubmissions: number;
+        }>(),
+        this.database.prepare(`
+          SELECT p.membership_id AS membershipId, u.display_name AS displayName, m.job_title AS jobTitle,
+            COUNT(DISTINCT es.id) AS completedSubmissions,
+            COUNT(DISTINCT es.rater_membership_id) AS independentRaters,
+            COUNT(DISTINCT substr(s.starts_at, 1, 10)) AS evaluatedDays
+          FROM evaluation_participations p
+          JOIN memberships m ON m.id = p.membership_id AND m.organization_id = ?
+          JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL
+          LEFT JOIN evaluation_submissions es
+            ON es.period_id = p.period_id AND es.subject_membership_id = p.membership_id AND es.status <> 'voided'
+          LEFT JOIN shifts s ON s.id = es.shift_id
+          WHERE p.period_id = ? AND p.can_be_evaluated = 1
+          GROUP BY p.membership_id, u.display_name, m.job_title
+          ORDER BY u.display_name
+        `).bind(organizationId, periodId).all<{
+          membershipId: string;
+          displayName: string;
+          jobTitle: string;
+          completedSubmissions: number;
+          independentRaters: number;
+          evaluatedDays: number;
+        }>(),
+        this.database.prepare(`
+          SELECT p.membership_id AS membershipId, c.id AS criterionId, c.name,
+            AVG(CASE WHEN ro.response_status = 'rated' THEN ro.value END) AS score
+          FROM evaluation_participations p
+          JOIN evaluation_periods ep ON ep.id = p.period_id
+          JOIN criteria c ON c.policy_version_id = ep.policy_version_id AND c.measurement_type = 'peer_rating'
+          LEFT JOIN evaluation_submissions es
+            ON es.period_id = p.period_id AND es.subject_membership_id = p.membership_id AND es.status <> 'voided'
+          LEFT JOIN rating_observations ro
+            ON ro.submission_id = es.id AND ro.criterion_id = c.id
+          WHERE p.period_id = ? AND p.can_be_evaluated = 1
+          GROUP BY p.membership_id, c.id, c.name, c.created_at
+          ORDER BY p.membership_id, c.created_at, c.id
+        `).bind(periodId).all<{ membershipId: string; criterionId: string; name: string; score: number | null }>(),
+      ]);
+
+      const daily = dailyRows.results.map((row) => ({
+        serviceDate: row.serviceDate,
+        completedSubmissions: Number(row.completedSubmissions),
+        expectedSubmissions: Number(row.expectedSubmissions),
+      }));
+      const expectedSubmissions = daily.reduce((total, row) => total + row.expectedSubmissions, 0);
+      const completedSubmissions = daily.reduce((total, row) => total + row.completedSubmissions, 0);
+      const results = resultRows.results.map((row) => {
+        const criteria = criterionRows.results
+          .filter((criterion) => criterion.membershipId === row.membershipId)
+          .map((criterion) => ({
+            criterionId: criterion.criterionId,
+            name: criterion.name,
+            score: criterion.score === null ? null : roundScore(Number(criterion.score)),
+          }));
+        const observedScores = criteria.flatMap((criterion) => criterion.score === null ? [] : [criterion.score]);
+        return {
+          ...row,
+          completedSubmissions: Number(row.completedSubmissions),
+          independentRaters: Number(row.independentRaters),
+          evaluatedDays: Number(row.evaluatedDays),
+          score: observedScores.length === 0 ? null : roundScore(observedScores.reduce((total, score) => total + score, 0) / observedScores.length),
+          criteria,
+        };
+      });
+      summary = {
+        periodId,
+        completedSubmissions,
+        expectedSubmissions,
+        completionPercent: expectedSubmissions === 0 ? 0 : Math.round((completedSubmissions / expectedSubmissions) * 100),
+        daily,
+        results,
+      };
+    }
     return {
       period,
       members: members.results.map((member) => ({ ...member, canEvaluate: member.canEvaluate === 1, canBeEvaluated: member.canBeEvaluated === 1 })),
       shifts: shifts.results,
+      summary,
     };
   }
 
@@ -368,9 +482,9 @@ export class D1AdminAuthRepository {
 
     await this.database.batch([
       this.database.prepare(`
-        INSERT INTO shifts (id, organization_id, starts_at, ends_at, section, status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'closed', ?)
-      `).bind(record.id, record.organizationId, record.startsAt, record.endsAt, record.section, record.now),
+        INSERT INTO shifts (id, organization_id, period_id, starts_at, ends_at, section, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'closed', ?)
+      `).bind(record.id, record.organizationId, period.id, record.startsAt, record.endsAt, record.section, record.now),
       ...members.results.map((member) => this.database.prepare(`
         INSERT INTO shift_assignments (id, shift_id, membership_id, role_during_shift, created_at)
         VALUES (?, ?, ?, ?, ?)
@@ -381,6 +495,27 @@ export class D1AdminAuthRepository {
       `).bind(record.auditId, record.organizationId, record.createdByMembershipId, record.id, JSON.stringify({ section: record.section, memberCount: members.results.length }), record.now),
     ]);
     return { created: true as const };
+  }
+
+  async closeEvaluationCycle(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, string>;
+    const period = await this.database.prepare(`
+      SELECT id FROM evaluation_periods
+      WHERE id = ? AND organization_id = ? AND status = 'open'
+      LIMIT 1
+    `).bind(record.periodId, record.organizationId).first<{ id: string }>();
+    if (!period) return { updated: false as const };
+    await this.database.batch([
+      this.database.prepare(`
+        UPDATE evaluation_periods SET status = 'under_review'
+        WHERE id = ? AND organization_id = ? AND status = 'open'
+      `).bind(record.periodId, record.organizationId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, reason, metadata_json, created_at)
+        VALUES (?, ?, ?, 'evaluation.cycle_closed', 'evaluation_period', ?, ?, '{}', ?)
+      `).bind(record.auditId, record.organizationId, record.actorMembershipId, record.periodId, record.reason, record.now),
+    ]);
+    return { updated: true as const };
   }
 
   async listAuditEvents(organizationId: string, limit: number) {
