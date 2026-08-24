@@ -388,6 +388,34 @@ test("enforces the administrator, head waiter, waiter, and cashier evaluation ma
     { displayName: "Garzón", canEvaluate: true, canBeEvaluated: true },
     { displayName: "Jefe de garzones", canEvaluate: true, canBeEvaluated: false },
   ]);
+
+  database.exec(`
+    INSERT INTO evaluation_submissions (id, organization_id, period_id, shift_id, rater_membership_id, subject_membership_id, status, submitted_at)
+    VALUES ('55555555-5555-4555-8555-555555555555', 'org-matrix', 'period-matrix', 'shift-matrix', 'membership-head-matrix', 'membership-waiter-matrix', 'submitted', '2026-08-25T02:15:00.000Z');
+    INSERT INTO rating_observations (id, submission_id, criterion_id, response_status, value, moderation_status)
+    VALUES ('observation-matrix', '55555555-5555-4555-8555-555555555555', 'criterion-matrix', 'rated', 4, 'not_required');
+  `);
+  const history = (await repository.getEvaluationOperations("org-matrix")).submissions;
+  assert.deepEqual(history.map(({ id, status, raterDisplayName, subjectDisplayName, score, responseCount }) => ({ id, status, raterDisplayName, subjectDisplayName, score, responseCount })), [{
+    id: "55555555-5555-4555-8555-555555555555",
+    status: "submitted",
+    raterDisplayName: "Jefe de garzones",
+    subjectDisplayName: "Garzón",
+    score: 4,
+    responseCount: 1,
+  }]);
+  assert.deepEqual(await repository.setEvaluationSubmissionStatus({
+    submissionId: "55555555-5555-4555-8555-555555555555", organizationId: "org-matrix", actorMembershipId: "membership-admin-matrix", auditId: "audit-void-matrix", status: "voided", reason: "Evaluación anterior al acuerdo vigente", now: "2026-08-25T02:20:00.000Z",
+  }), { updated: true });
+  assert.equal(database.prepare("SELECT status FROM evaluation_submissions WHERE id = '55555555-5555-4555-8555-555555555555'").get().status, "voided");
+  assert.deepEqual(await repository.setEvaluationSubmissionStatus({
+    submissionId: "55555555-5555-4555-8555-555555555555", organizationId: "org-matrix", actorMembershipId: "membership-admin-matrix", auditId: "audit-restore-matrix", status: "reopened", reason: "Restauración revisada por administración", now: "2026-08-25T02:21:00.000Z",
+  }), { updated: true });
+  assert.deepEqual(await repository.voidEvaluationHistory({
+    membershipId: "membership-waiter-matrix", organizationId: "org-matrix", actorMembershipId: "membership-admin-matrix", auditId: "audit-bulk-matrix", scope: "received", reason: "Corrección completa autorizada por administración", now: "2026-08-25T02:22:00.000Z",
+  }), { updated: true, count: 1 });
+  assert.equal(database.prepare("SELECT status FROM evaluation_submissions WHERE id = '55555555-5555-4555-8555-555555555555'").get().status, "voided");
+  assert.deepEqual(database.prepare("SELECT action FROM audit_events WHERE id IN ('audit-void-matrix', 'audit-restore-matrix', 'audit-bulk-matrix') ORDER BY created_at").all().map((row) => row.action), ["evaluation.submission_voided", "evaluation.submission_restored", "evaluation.history_voided"]);
 });
 
 test("loads the active membership bound to the authenticated subject", async () => {

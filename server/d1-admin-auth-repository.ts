@@ -274,7 +274,7 @@ export class D1AdminAuthRepository {
       ORDER BY CASE ep.status WHEN 'open' THEN 0 WHEN 'under_review' THEN 1 ELSE 2 END, ep.starts_at DESC LIMIT 1
     `).bind(organizationId).first<Record<string, unknown>>();
 
-    const [members, shifts] = await Promise.all([
+    const [members, shifts, submissions] = await Promise.all([
       this.database.prepare(`
         SELECT m.id AS membershipId, u.display_name AS displayName, m.job_title AS jobTitle, u.status,
           CASE WHEN u.status = 'active' THEN 1 ELSE 0 END AS canEvaluate,
@@ -294,7 +294,44 @@ export class D1AdminAuthRepository {
         ORDER BY s.starts_at DESC
         LIMIT 20
       `).bind(organizationId).all<Record<string, unknown>>(),
+      this.database.prepare(`
+        SELECT es.id, es.status, es.submitted_at AS submittedAt,
+          ep.name AS periodName, s.starts_at AS shiftStartsAt,
+          rater.id AS raterMembershipId, rater_user.display_name AS raterDisplayName,
+          subject.id AS subjectMembershipId, subject_user.display_name AS subjectDisplayName,
+          AVG(CASE WHEN ro.response_status = 'rated' THEN ro.value END) AS score,
+          COUNT(ro.id) AS responseCount
+        FROM evaluation_submissions es
+        JOIN evaluation_periods ep ON ep.id = es.period_id
+        JOIN shifts s ON s.id = es.shift_id
+        JOIN memberships rater ON rater.id = es.rater_membership_id
+        JOIN users rater_user ON rater_user.id = rater.user_id
+        JOIN memberships subject ON subject.id = es.subject_membership_id
+        JOIN users subject_user ON subject_user.id = subject.user_id
+        LEFT JOIN rating_observations ro ON ro.submission_id = es.id
+        WHERE es.organization_id = ?
+        GROUP BY es.id, ep.name, s.starts_at, rater.id, rater_user.display_name, subject.id, subject_user.display_name
+        ORDER BY es.submitted_at DESC
+        LIMIT 100
+      `).bind(organizationId).all<{
+        id: string;
+        status: string;
+        submittedAt: string;
+        periodName: string;
+        shiftStartsAt: string;
+        raterMembershipId: string;
+        raterDisplayName: string;
+        subjectMembershipId: string;
+        subjectDisplayName: string;
+        score: number | null;
+        responseCount: number;
+      }>(),
     ]);
+    const evaluationHistory = submissions.results.map((submission) => ({
+      ...submission,
+      score: submission.score === null ? null : roundScore(Number(submission.score)),
+      responseCount: Number(submission.responseCount),
+    }));
 
     let summary: Record<string, unknown> | null = null;
     if (period) {
@@ -455,6 +492,7 @@ export class D1AdminAuthRepository {
         period,
         members: members.results.map((member) => ({ ...member, canEvaluate: member.canEvaluate === 1, canBeEvaluated: member.canBeEvaluated === 1 })),
         shifts: shifts.results,
+        submissions: evaluationHistory,
         criteria: cycleCriteriaRows.results,
         summary,
       };
@@ -463,9 +501,76 @@ export class D1AdminAuthRepository {
       period,
       members: members.results.map((member) => ({ ...member, canEvaluate: member.canEvaluate === 1, canBeEvaluated: member.canBeEvaluated === 1 })),
       shifts: shifts.results,
+      submissions: evaluationHistory,
       criteria: [],
       summary,
     };
+  }
+
+  async setEvaluationSubmissionStatus(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, string>;
+    const submission = await this.database.prepare(`
+      SELECT es.id, es.status, ep.id AS periodId,
+        COALESCE(subject_participation.can_be_evaluated, 0) AS subjectCanBeEvaluated
+      FROM evaluation_submissions es
+      JOIN evaluation_periods ep ON ep.id = es.period_id AND ep.organization_id = ?
+      LEFT JOIN evaluation_participations subject_participation
+        ON subject_participation.period_id = es.period_id
+        AND subject_participation.membership_id = es.subject_membership_id
+      WHERE es.id = ? AND es.organization_id = ?
+      LIMIT 1
+    `).bind(record.organizationId, record.submissionId, record.organizationId).first<{
+      id: string;
+      status: string;
+      periodId: string;
+      subjectCanBeEvaluated: number;
+    }>();
+    if (!submission) return { updated: false as const, reason: "evaluation_submission_not_found" };
+    if (record.status === "reopened" && Number(submission.subjectCanBeEvaluated) !== 1) {
+      return { updated: false as const, reason: "subject_not_evaluable" };
+    }
+    const action = record.status === "voided" ? "evaluation.submission_voided" : "evaluation.submission_restored";
+    await this.database.batch([
+      this.database.prepare("UPDATE evaluation_submissions SET status = ? WHERE id = ? AND organization_id = ?")
+        .bind(record.status, submission.id, record.organizationId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, reason, metadata_json, created_at)
+        VALUES (?, ?, ?, ?, 'evaluation_submission', ?, ?, ?, ?)
+      `).bind(record.auditId, record.organizationId, record.actorMembershipId, action, submission.id, record.reason, JSON.stringify({ previousStatus: submission.status, status: record.status, periodId: submission.periodId }), record.now),
+    ]);
+    return { updated: true as const };
+  }
+
+  async voidEvaluationHistory(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, string>;
+    const membership = await this.database.prepare(`
+      SELECT id FROM memberships
+      WHERE id = ? AND organization_id = ? AND role <> 'admin' AND deleted_at IS NULL
+      LIMIT 1
+    `).bind(record.membershipId, record.organizationId).first<{ id: string }>();
+    if (!membership) return { updated: false as const, reason: "evaluation_member_not_found" };
+    const scopeClause = record.scope === "received"
+      ? "subject_membership_id = ?"
+      : record.scope === "authored"
+        ? "rater_membership_id = ?"
+        : "(subject_membership_id = ? OR rater_membership_id = ?)";
+    const scopeParameters = record.scope === "all" ? [membership.id, membership.id] : [membership.id];
+    const countRow = await this.database.prepare(`
+      SELECT COUNT(*) AS count FROM evaluation_submissions
+      WHERE organization_id = ? AND status <> 'voided' AND ${scopeClause}
+    `).bind(record.organizationId, ...scopeParameters).first<{ count: number }>();
+    const count = Number(countRow?.count ?? 0);
+    await this.database.batch([
+      this.database.prepare(`
+        UPDATE evaluation_submissions SET status = 'voided'
+        WHERE organization_id = ? AND status <> 'voided' AND ${scopeClause}
+      `).bind(record.organizationId, ...scopeParameters),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, reason, metadata_json, created_at)
+        VALUES (?, ?, ?, 'evaluation.history_voided', 'membership', ?, ?, ?, ?)
+      `).bind(record.auditId, record.organizationId, record.actorMembershipId, membership.id, record.reason, JSON.stringify({ scope: record.scope, count }), record.now),
+    ]);
+    return { updated: true as const, count };
   }
 
   async openEvaluationCycle(rawRecord: Record<string, unknown>) {

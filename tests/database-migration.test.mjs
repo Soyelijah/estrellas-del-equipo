@@ -240,3 +240,32 @@ test("head waiter policy migration preserves evaluations while making the role n
     exclusion_reason: null,
   });
 });
+
+test("policy cleanup migration voids historical evaluations of excluded subjects without deleting evidence", () => {
+  const migrationPaths = foundationMigrationPaths();
+  const cleanupMigration = migrationPaths.find(({ up }) => up.pathname.endsWith("0010_void_ineligible_evaluation_history.sql"));
+  assert.ok(cleanupMigration);
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON");
+  for (const paths of migrationPaths) {
+    if (paths !== cleanupMigration) database.exec(readFileSync(paths.up, "utf8"));
+  }
+  database.exec(`
+    INSERT INTO organizations (id, name, timezone, status) VALUES ('org-cleanup', 'Restaurante', 'America/Santiago', 'active');
+    INSERT INTO users (id, login_identifier, display_name, status) VALUES ('rater-cleanup', 'garzon.cleanup', 'Garzón', 'active'), ('head-cleanup', 'jefe.cleanup', 'Jefe de garzones', 'active');
+    INSERT INTO memberships (id, organization_id, user_id, role, job_title, starts_at) VALUES ('membership-rater-cleanup', 'org-cleanup', 'rater-cleanup', 'worker', 'waiter', '2026-08-01'), ('membership-head-cleanup', 'org-cleanup', 'head-cleanup', 'worker', 'head_waiter', '2026-08-01');
+    INSERT INTO policy_versions (id, organization_id, version, effective_from, status, minimum_raters, minimum_shifts, created_by_membership_id) VALUES ('policy-cleanup', 'org-cleanup', 1, '2026-08-01', 'active', 2, 1, 'membership-head-cleanup');
+    INSERT INTO evaluation_periods (id, organization_id, policy_version_id, name, starts_at, ends_at, status) VALUES ('period-cleanup', 'org-cleanup', 'policy-cleanup', 'Agosto', '2026-08-01', '2026-08-31', 'open');
+    INSERT INTO evaluation_participations (id, period_id, membership_id, can_evaluate, can_be_evaluated, exclusion_reason) VALUES ('participation-rater-cleanup', 'period-cleanup', 'membership-rater-cleanup', 1, 1, NULL), ('participation-head-cleanup', 'period-cleanup', 'membership-head-cleanup', 1, 0, 'head_waiter_excluded');
+    INSERT INTO shifts (id, organization_id, period_id, starts_at, ends_at, section, status) VALUES ('shift-cleanup', 'org-cleanup', 'period-cleanup', '2026-08-24T18:00:00Z', '2026-08-25T02:00:00Z', 'Turno general', 'closed');
+    INSERT INTO evaluation_submissions (id, organization_id, period_id, shift_id, rater_membership_id, subject_membership_id, status, submitted_at) VALUES ('submission-cleanup', 'org-cleanup', 'period-cleanup', 'shift-cleanup', 'membership-rater-cleanup', 'membership-head-cleanup', 'submitted', '2026-08-25T02:05:00Z');
+    INSERT INTO criteria (id, policy_version_id, code, name, description, category, measurement_type, weight_basis_points) VALUES ('criterion-cleanup', 'policy-cleanup', 'teamwork', 'Equipo', 'Coopera', 'teamwork', 'peer_rating', 10000);
+    INSERT INTO rating_observations (id, submission_id, criterion_id, response_status, value) VALUES ('observation-cleanup', 'submission-cleanup', 'criterion-cleanup', 'rated', 5);
+  `);
+
+  database.exec(readFileSync(cleanupMigration.up, "utf8"));
+  assert.equal(database.prepare("SELECT status FROM evaluation_submissions WHERE id = 'submission-cleanup'").get().status, "voided");
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM rating_observations WHERE submission_id = 'submission-cleanup'").get().count, 1);
+  database.exec(readFileSync(cleanupMigration.down, "utf8"));
+  assert.equal(database.prepare("SELECT status FROM evaluation_submissions WHERE id = 'submission-cleanup'").get().status, "reopened");
+});

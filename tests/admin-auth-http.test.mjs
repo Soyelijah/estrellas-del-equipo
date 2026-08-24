@@ -32,6 +32,8 @@ function dependencies(overrides = {}) {
       async openEvaluationCycle() { return { created: true }; },
       async createEvaluationShift() { return { created: true }; },
       async deleteEvaluationShift() { return { deleted: true }; },
+      async setEvaluationSubmissionStatus() { return { updated: true }; },
+      async voidEvaluationHistory() { return { updated: true, count: 0 }; },
       async closeEvaluationCycle() { return { updated: true }; },
       async deleteEvaluationCycle() { return { deleted: true }; },
       ...repositoryOverrides,
@@ -334,4 +336,35 @@ test("permanently deletes only a confirmed legacy cycle through an administrator
     reason: "Reemplazo autorizado por el ciclo mensual oficial",
     now: "2026-08-22T12:00:00.000Z",
   });
+});
+
+test("lets only an administrator moderate one evaluation and bulk-void a persons history", async () => {
+  const adminActor = { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "11111111-1111-4111-8111-111111111111" };
+  const workerActor = { ...adminActor, role: "worker", membershipId: "22222222-2222-4222-8222-222222222222" };
+  const calls = [];
+  const repository = {
+    async findSessionActor() { return adminActor; },
+    async setEvaluationSubmissionStatus(record) { calls.push({ type: "single", record }); return { updated: true }; },
+    async voidEvaluationHistory(record) { calls.push({ type: "bulk", record }); return { updated: true, count: 3 }; },
+  };
+  const headers = { cookie: "estrellas_session=private-cookie-token" };
+  const submissionId = "33333333-3333-4333-8333-333333333333";
+  const membershipId = "44444444-4444-4444-8444-444444444444";
+
+  const single = await handleAdminAuthRequest(mutation(`/api/admin/evaluation-submissions/${submissionId}/status`, { action: "void", reason: "Evaluación anterior al acuerdo vigente" }, headers, "PATCH"), dependencies({ repository }));
+  const bulk = await handleAdminAuthRequest(mutation(`/api/admin/evaluation-history/${membershipId}`, { scope: "all", confirmation: "ANULAR HISTORIAL", reason: "Corrección completa autorizada por administración" }, headers, "DELETE"), dependencies({ repository }));
+  const forbidden = await handleAdminAuthRequest(mutation(`/api/admin/evaluation-submissions/${submissionId}/status`, { action: "void", reason: "Intento no autorizado" }, headers, "PATCH"), dependencies({ repository: { ...repository, async findSessionActor() { return workerActor; } } }));
+  const invalidBulk = await handleAdminAuthRequest(mutation(`/api/admin/evaluation-history/${membershipId}`, { scope: "all", confirmation: "borrar", reason: "Confirmación incorrecta" }, headers, "DELETE"), dependencies({ repository }));
+
+  assert.equal(single.status, 200);
+  assert.deepEqual(await single.json(), { ok: true });
+  assert.equal(bulk.status, 200);
+  assert.deepEqual(await bulk.json(), { ok: true, count: 3 });
+  assert.equal(forbidden.status, 403);
+  assert.deepEqual(await forbidden.json(), { ok: false, error: "admin_required" });
+  assert.equal(invalidBulk.status, 422);
+  assert.deepEqual(await invalidBulk.json(), { ok: false, error: "invalid_history_delete" });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].record.status, "voided");
+  assert.equal(calls[1].record.scope, "all");
 });

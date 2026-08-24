@@ -98,6 +98,19 @@ type EvaluationOperations = {
     status: string;
     memberCount: number;
   }>;
+  submissions: Array<{
+    id: string;
+    status: "submitted" | "reopened" | "voided";
+    submittedAt: string;
+    periodName: string;
+    shiftStartsAt: string;
+    raterMembershipId: string;
+    raterDisplayName: string;
+    subjectMembershipId: string;
+    subjectDisplayName: string;
+    score: number | null;
+    responseCount: number;
+  }>;
   summary: EvaluationSummary | null;
 };
 type EvaluationWorkspace = {
@@ -164,6 +177,9 @@ const auditLabels: Record<string, string> = {
   "admin.password_recovered": "Acceso administrador recuperado",
   "evaluation.cycle_opened": "Ciclo de evaluación abierto",
   "evaluation.cycle_closed": "Mes de evaluación cerrado",
+  "evaluation.submission_voided": "Evaluación anulada",
+  "evaluation.submission_restored": "Evaluación restaurada",
+  "evaluation.history_voided": "Historial de evaluaciones anulado",
   "evaluation.cycle_deleted": "Ciclo de evaluación eliminado",
   "evaluation.shift_recorded": "Turno compartido registrado",
   "evaluation.shift_deleted": "Turno eliminado",
@@ -267,7 +283,7 @@ export default function Home() {
     });
     return {
       response,
-      result: (await response.json()) as { ok: boolean; error?: string },
+      result: (await response.json()) as { ok: boolean; error?: string; count?: number },
     };
   }
   function friendlyError(error?: string) {
@@ -309,6 +325,16 @@ export default function Home() {
         "Escribe la confirmación exacta y un motivo claro para eliminar el ciclo.",
       evaluation_cycle_not_found:
         "El mes ya estaba cerrado o no está disponible.",
+      invalid_evaluation_moderation:
+        "Escribe un motivo claro antes de cambiar esta evaluación.",
+      evaluation_submission_not_found:
+        "La evaluación ya no está disponible.",
+      subject_not_evaluable:
+        "No puede restaurarse porque esa persona no es evaluable según el acuerdo vigente.",
+      invalid_history_delete:
+        "Selecciona la persona, el alcance, escribe ANULAR HISTORIAL y agrega un motivo.",
+      evaluation_member_not_found:
+        "La persona seleccionada ya no está disponible.",
       insufficient_observation:
         "Debes valorar al menos dos aspectos que sí observaste.",
       missing_observation_note:
@@ -631,6 +657,60 @@ export default function Home() {
       setSubmitting(false);
     }
   }
+  async function submitEvaluationModeration(
+    event: FormEvent<HTMLFormElement>,
+    submissionId: string,
+    action: "void" | "restore",
+  ) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    const data = new FormData(event.currentTarget);
+    try {
+      const { response, result } = await requestJson(
+        `/api/admin/evaluation-submissions/${submissionId}/status`,
+        "PATCH",
+        { action, reason: data.get("reason") },
+      );
+      if (!response.ok) {
+        setMessage(friendlyError(result.error));
+        return;
+      }
+      setMessage(action === "void" ? "Evaluación anulada y retirada de todos los resultados." : "Evaluación restaurada con trazabilidad administrativa.");
+      await Promise.all([loadOperations(), loadAudit()]);
+    } catch {
+      setMessage("No se pudo actualizar la evaluación.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function submitHistoryDelete(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const membershipId = String(data.get("membershipId") ?? "");
+    try {
+      const { response, result } = await requestJson(
+        `/api/admin/evaluation-history/${membershipId}`,
+        "DELETE",
+        { scope: data.get("scope"), reason: data.get("reason"), confirmation: data.get("confirmation") },
+      );
+      if (!response.ok) {
+        setMessage(friendlyError(result.error));
+        return;
+      }
+      const count = typeof result.count === "number" ? result.count : 0;
+      setMessage(`${count} evaluación${count === 1 ? "" : "es"} anulada${count === 1 ? "" : "s"}. La acción quedó registrada.`);
+      form.reset();
+      await Promise.all([loadOperations(), loadAudit()]);
+    } catch {
+      setMessage("No se pudo anular el historial seleccionado.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
   async function submitEvaluation(
     event: FormEvent<HTMLFormElement>,
     assignment: EvaluationWorkspace["assignments"][number],
@@ -857,6 +937,8 @@ export default function Home() {
             submitCycle={submitCycle}
             submitShift={submitShift}
             submitShiftDelete={submitShiftDelete}
+            submitEvaluationModeration={submitEvaluationModeration}
+            submitHistoryDelete={submitHistoryDelete}
             shiftConfirmation={shiftConfirmation}
             dismissShiftConfirmation={() => setShiftConfirmation(null)}
             submitCycleClose={submitCycleClose}
@@ -1711,6 +1793,8 @@ function AdminOperations({
   submitCycle,
   submitShift,
   submitShiftDelete,
+  submitEvaluationModeration,
+  submitHistoryDelete,
   shiftConfirmation,
   dismissShiftConfirmation,
   submitCycleClose,
@@ -1725,6 +1809,12 @@ function AdminOperations({
     event: FormEvent<HTMLFormElement>,
     shiftId: string,
   ): Promise<void>;
+  submitEvaluationModeration(
+    event: FormEvent<HTMLFormElement>,
+    submissionId: string,
+    action: "void" | "restore",
+  ): Promise<void>;
+  submitHistoryDelete(event: FormEvent<HTMLFormElement>): Promise<void>;
   shiftConfirmation: ShiftConfirmation | null;
   dismissShiftConfirmation(): void;
   submitCycleClose(
@@ -2048,6 +2138,74 @@ function AdminOperations({
           </button>
         </form>
       )}
+      <section className="history-control">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">CONTROL ADMINISTRATIVO</p>
+            <h2>Historial de evaluaciones</h2>
+            <span>Anula errores sin alterar silenciosamente las estrellas originales. Cada decisión queda auditada.</span>
+          </div>
+          <span className="status neutral">{operations?.submissions.length ?? 0} registros</span>
+        </div>
+        <form className="panel history-bulk-form" onSubmit={(event) => void submitHistoryDelete(event)}>
+          <div>
+            <span className="section-kicker">ANULACIÓN POR PERSONA</span>
+            <h3>Retirar todo un historial seleccionado</h3>
+            <p>Puedes retirar evaluaciones recibidas, emitidas o ambas. Los registros permanecen visibles como anulados para proteger la trazabilidad.</p>
+          </div>
+          <div className="history-bulk-grid">
+            <label>
+              Persona
+              <select name="membershipId" required defaultValue="">
+                <option value="" disabled>Selecciona una persona</option>
+                {operations?.members.map((member) => <option key={member.membershipId} value={member.membershipId}>{member.displayName}</option>)}
+              </select>
+            </label>
+            <label>
+              Qué historial retirar
+              <select name="scope" required defaultValue="received">
+                <option value="received">Evaluaciones recibidas</option>
+                <option value="authored">Evaluaciones realizadas</option>
+                <option value="all">Todo: recibidas y realizadas</option>
+              </select>
+            </label>
+            <label>
+              Confirmación exacta
+              <input name="confirmation" required autoComplete="off" placeholder="ANULAR HISTORIAL" />
+            </label>
+            <label>
+              Motivo obligatorio
+              <input name="reason" required minLength={8} maxLength={240} placeholder="Ej.: Evaluación creada antes del acuerdo vigente" />
+            </label>
+          </div>
+          <button className="danger-action" disabled={submitting}>Anular historial seleccionado</button>
+        </form>
+        {!operations?.submissions.length ? (
+          <Empty title="No hay evaluaciones registradas" text="Cuando alguien complete una evaluación aparecerá aquí con sus controles administrativos." />
+        ) : (
+          <div className="history-list">
+            {operations.submissions.map((submission) => {
+              const subjectCanBeEvaluated = operations.members.find((member) => member.membershipId === submission.subjectMembershipId)?.canBeEvaluated ?? false;
+              return (
+                <article key={submission.id} className={submission.status === "voided" ? "voided" : ""}>
+                  <div className="history-route"><strong>{submission.raterDisplayName}</strong><span>→</span><strong>{submission.subjectDisplayName}</strong></div>
+                  <p>{submission.periodName} · {formatServiceDate(submission.shiftStartsAt)}</p>
+                  <div className="history-meta">
+                    <span className={`status ${submission.status === "voided" ? "neutral" : "complete"}`}>{submission.status === "voided" ? "Anulada" : "Vigente"}</span>
+                    <b>{submission.score === null ? "Sin puntuación" : `${submission.score.toFixed(2)} de 5`}</b>
+                  </div>
+                  <form onSubmit={(event) => void submitEvaluationModeration(event, submission.id, submission.status === "voided" ? "restore" : "void")}>
+                    <input name="reason" required minLength={8} maxLength={240} defaultValue={submission.status === "voided" ? "Restauración revisada por administración" : "Anulación revisada por administración"} aria-label={`Motivo para ${submission.status === "voided" ? "restaurar" : "anular"} la evaluación de ${submission.subjectDisplayName}`} />
+                    <button className={submission.status === "voided" ? "secondary" : "danger-action"} disabled={submitting || (submission.status === "voided" && !subjectCanBeEvaluated)}>
+                      {submission.status === "voided" ? (subjectCanBeEvaluated ? "Restaurar evaluación" : "No restaurable por acuerdo") : "Anular evaluación"}
+                    </button>
+                  </form>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
       <section className="shift-ledger">
         <div className="section-heading">
           <div>

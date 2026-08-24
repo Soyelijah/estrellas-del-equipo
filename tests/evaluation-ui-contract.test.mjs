@@ -80,3 +80,16 @@ test("registers one general shift without asking for an area", () => {
   assert.match(page, /aria-live="polite"/);
   assert.match(page, /Cerrar confirmación/);
 });
+
+test("gives the administrator audited controls over evaluation history", () => {
+  assert.match(page, /Historial de evaluaciones/);
+  assert.match(page, /ANULAR HISTORIAL/);
+  assert.match(page, /Evaluaciones recibidas/);
+  assert.match(page, /Evaluaciones realizadas/);
+  assert.match(page, /Todo: recibidas y realizadas/);
+  assert.match(page, /Anular evaluación/);
+  assert.match(page, /Restaurar evaluación/);
+  assert.match(page, /No restaurable por acuerdo/);
+  assert.match(page, /submitEvaluationModeration/);
+  assert.match(page, /submitHistoryDelete/);
+});

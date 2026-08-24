@@ -1,5 +1,5 @@
 import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from "./admin-auth-service.ts";
-import { closeEvaluationCycle, deleteEvaluationCyclePermanently, deleteEvaluationShift, openEvaluationCycle, registerEvaluationShift } from "./evaluation-admin-service.ts";
+import { closeEvaluationCycle, deleteEvaluationCyclePermanently, deleteEvaluationShift, moderateEvaluationSubmission, openEvaluationCycle, registerEvaluationShift, voidMemberEvaluationHistory } from "./evaluation-admin-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
 const COOKIE_NAME = "estrellas_session";
@@ -26,6 +26,8 @@ type AuthDependencies = {
     openEvaluationCycle(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
     createEvaluationShift(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
     deleteEvaluationShift(record: Record<string, unknown>): Promise<{ deleted: true } | { deleted: false; reason: string }>;
+    setEvaluationSubmissionStatus(record: Record<string, unknown>): Promise<{ updated: true } | { updated: false; reason: string }>;
+    voidEvaluationHistory(record: Record<string, unknown>): Promise<{ updated: true; count: number } | { updated: false; reason: string }>;
     closeEvaluationCycle(record: Record<string, unknown>): Promise<{ updated: boolean }>;
     deleteEvaluationCycle(record: Record<string, unknown>): Promise<{ deleted: boolean }>;
   };
@@ -181,6 +183,32 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         shiftId: deleteShiftMatch[1],
       });
       return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
+    }
+
+    const submissionStatusMatch = path.match(/^\/api\/admin\/evaluation-submissions\/([^/]+)\/status$/);
+    if (request.method === "PATCH" && submissionStatusMatch) {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const result = await moderateEvaluationSubmission(parsed.body, actor, {
+        repository: dependencies.repository,
+        createId: dependencies.createId,
+        now: serviceDependencies.now,
+        submissionId: submissionStatusMatch[1],
+      });
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
+    }
+
+    const memberHistoryMatch = path.match(/^\/api\/admin\/evaluation-history\/([^/]+)$/);
+    if (request.method === "DELETE" && memberHistoryMatch) {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const result = await voidMemberEvaluationHistory(parsed.body, actor, {
+        repository: dependencies.repository,
+        createId: dependencies.createId,
+        now: serviceDependencies.now,
+        membershipId: memberHistoryMatch[1],
+      });
+      return result.ok ? json({ ok: true, count: result.count }, result.status) : json({ ok: false, error: result.error }, result.status);
     }
 
     const closeCycleMatch = path.match(/^\/api\/admin\/evaluation-cycles\/([^/]+)\/close$/);

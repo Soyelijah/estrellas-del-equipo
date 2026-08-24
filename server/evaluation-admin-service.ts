@@ -4,11 +4,14 @@ type EvaluationAdminRepository = {
   openEvaluationCycle(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
   createEvaluationShift(record: Record<string, unknown>): Promise<{ created: true } | { created: false; reason: string }>;
   deleteEvaluationShift(record: Record<string, unknown>): Promise<{ deleted: true } | { deleted: false; reason: string }>;
+  setEvaluationSubmissionStatus(record: Record<string, unknown>): Promise<{ updated: true } | { updated: false; reason: string }>;
+  voidEvaluationHistory(record: Record<string, unknown>): Promise<{ updated: true; count: number } | { updated: false; reason: string }>;
   closeEvaluationCycle(record: Record<string, unknown>): Promise<{ updated: boolean }>;
   deleteEvaluationCycle(record: Record<string, unknown>): Promise<{ deleted: boolean }>;
 };
 
 const LEGACY_DELETE_CONFIRMATION = "CONFIRMO ELIMINAR CICLO ANTIGUO";
+const HISTORY_DELETE_CONFIRMATION = "ANULAR HISTORIAL";
 
 const DEFAULT_CRITERIA = [
   { code: "discipline", name: "Disciplina, puntualidad y presentación", description: "Llega a tiempo, cumple horarios, mantiene uniforme y presentación adecuados, respeta normas y permanece preparado durante el turno.", category: "discipline", weightBasisPoints: 1667 },
@@ -80,6 +83,73 @@ export async function deleteEvaluationShift(
       : { ok: false as const, status: 404 as const, error: result.reason };
   }
   return { ok: true as const, status: 200 as const };
+}
+
+export async function moderateEvaluationSubmission(
+  input: unknown,
+  actor: SessionActor,
+  dependencies: {
+    repository: EvaluationAdminRepository;
+    createId: () => string;
+    now: string;
+    submissionId: string;
+  },
+) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403 as const, error: "admin_required" };
+  if (!isRecord(input)) return { ok: false as const, status: 422 as const, error: "invalid_evaluation_moderation" };
+  const submissionId = uuidText(dependencies.submissionId) ? dependencies.submissionId : null;
+  const action = input.action === "void" || input.action === "restore" ? input.action : null;
+  const reason = boundedText(input.reason, 8, 240);
+  if (!submissionId || !action || !reason) {
+    return { ok: false as const, status: 422 as const, error: "invalid_evaluation_moderation" };
+  }
+  const result = await dependencies.repository.setEvaluationSubmissionStatus({
+    submissionId,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    auditId: dependencies.createId(),
+    status: action === "void" ? "voided" : "reopened",
+    reason,
+    now: dependencies.now,
+  });
+  if (!result.updated) {
+    return result.reason === "subject_not_evaluable"
+      ? { ok: false as const, status: 409 as const, error: result.reason }
+      : { ok: false as const, status: 404 as const, error: result.reason };
+  }
+  return { ok: true as const, status: 200 as const };
+}
+
+export async function voidMemberEvaluationHistory(
+  input: unknown,
+  actor: SessionActor,
+  dependencies: {
+    repository: EvaluationAdminRepository;
+    createId: () => string;
+    now: string;
+    membershipId: string;
+  },
+) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403 as const, error: "admin_required" };
+  if (!isRecord(input)) return { ok: false as const, status: 422 as const, error: "invalid_history_delete" };
+  const membershipId = uuidText(dependencies.membershipId) ? dependencies.membershipId : null;
+  const scope = input.scope === "received" || input.scope === "authored" || input.scope === "all" ? input.scope : null;
+  const reason = boundedText(input.reason, 8, 240);
+  const confirmation = typeof input.confirmation === "string" ? input.confirmation.trim() : "";
+  if (!membershipId || !scope || !reason || confirmation !== HISTORY_DELETE_CONFIRMATION) {
+    return { ok: false as const, status: 422 as const, error: "invalid_history_delete" };
+  }
+  const result = await dependencies.repository.voidEvaluationHistory({
+    membershipId,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    auditId: dependencies.createId(),
+    scope,
+    reason,
+    now: dependencies.now,
+  });
+  if (!result.updated) return { ok: false as const, status: 404 as const, error: result.reason };
+  return { ok: true as const, status: 200 as const, count: result.count };
 }
 
 export async function registerEvaluationShift(
