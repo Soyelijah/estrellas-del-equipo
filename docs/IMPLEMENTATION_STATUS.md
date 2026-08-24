@@ -18,12 +18,14 @@
   5. Comunicación, compañerismo y trabajo en equipo.
   6. Autocrítica, aprendizaje y mejora continua.
 - Evaluaciones privadas derivadas de cuentas, ciclos, participaciones y turnos compartidos reales.
-- Formularios diarios de escala 1–5; las respuestas no observadas no producen puntuación.
+- Formularios diarios con controles visuales de cinco estrellas, etiquetas accesibles y alternativa honesta de no observado.
 - Promedio mensual por persona y por criterio, calculado únicamente con observaciones reales.
 - Cumplimiento diario separado del desempeño: los días incompletos quedan pendientes y no fabrican notas.
 - Cierre mensual exclusivo del administrador, con motivo auditado y bloqueo de nuevas evaluaciones.
 - Resultados sin modificación automática de los factores de propina; cualquier cambio requiere una acción administrativa explícita.
 - Interfaz separada para administrador y trabajadores, con estados de carga, error y vacío sin personas ni resultados de ejemplo.
+- Incorporación abierta: el sistema muestra la cantidad real de cuentas, pero no impone un máximo de seis trabajadores.
+- Explicación operativa dentro del panel para distinguir el ciclo mensual vigente del registro diario de un turno.
 
 ## Persistencia y seguridad
 

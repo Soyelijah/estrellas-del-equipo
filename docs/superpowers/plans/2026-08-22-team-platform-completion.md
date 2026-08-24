@@ -112,3 +112,16 @@
 - [x] Enforce the period start/end boundary server-side.
 - [x] Run the complete test, lint, migration, security, artifact, and live smoke gates.
 - [x] Commit, push, save, deploy, and verify the exact release at `equipo.zgamersa.com`.
+
+### Task 8: Official star evaluation experience and open-ended onboarding
+
+**Files:** `app/page.tsx`, `app/view-model.ts`, `app/globals.css`, `server/evaluation-admin-service.ts`, and their tests.
+
+**Interfaces:** Accessible five-star peer ratings; explicit monthly-cycle and daily-shift guidance; full official criterion descriptions; account onboarding without an artificial maximum.
+
+- [x] Write failing UI-contract and view-model tests for star controls, explanatory copy, and unlimited accounts.
+- [x] Replace every criterion score list with an accessible five-star radio control.
+- [x] Explain what the current monthly cycle does and why the administrator records each real shift.
+- [x] Remove the inherited six-account completion target without changing real account data.
+- [x] Expand the six criterion descriptions to the complete agreed dining-room definitions.
+- [x] Run the targeted tests, complete suite, lint, and Sites build.

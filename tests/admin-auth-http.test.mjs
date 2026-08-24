@@ -245,6 +245,14 @@ test("opens an evaluation cycle and registers a completed shared shift", async (
     { code: "teamwork", name: "Comunicación, compañerismo y trabajo en equipo", weightBasisPoints: 1666 },
     { code: "continuous_improvement", name: "Autocrítica, aprendizaje y mejora continua", weightBasisPoints: 1666 },
   ]);
+  assert.deepEqual(calls[0].record.criteria.map(({ description }) => description), [
+    "Llega a tiempo, cumple horarios, mantiene uniforme y presentación adecuados, respeta normas y permanece preparado durante el turno.",
+    "Toma comandas correctamente, confirma pedidos, evita errores, cumple sus tareas de apertura y cierre, y se hace responsable de lo que le corresponde.",
+    "Recibe con amabilidad, escucha, explica con claridad, anticipa necesidades, maneja reclamos correctamente y mantiene un servicio profesional.",
+    "Conoce comidas, ingredientes, alérgenos, tragos y vinos; puede explicarlos con fluidez y recomendar opciones apropiadas sin inventar información.",
+    "Informa oportunamente, coordina con salón, barra y caja, ayuda cuando un compañero está sobrecargado y evita conflictos o comentarios perjudiciales.",
+    "Reconoce errores, acepta correcciones, evita repetirlos, pregunta cuando desconoce algo y demuestra avances reales durante el período evaluado.",
+  ]);
   assert.equal(calls[0].record.criteria.reduce((total, criterion) => total + criterion.weightBasisPoints, 0), 10_000);
   assert.deepEqual(calls[1].record.membershipIds, ["m-worker-1", "m-worker-2"]);
   assert.equal(calls[2].type, "close");

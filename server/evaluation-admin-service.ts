@@ -7,12 +7,12 @@ type EvaluationAdminRepository = {
 };
 
 const DEFAULT_CRITERIA = [
-  { code: "discipline", name: "Disciplina, puntualidad y presentación", description: "Llega a tiempo, cumple las normas y mantiene una presentación adecuada durante el turno.", category: "discipline", weightBasisPoints: 1667 },
-  { code: "operational_responsibility", name: "Responsabilidad y precisión operativa", description: "Cumple sus tareas, confirma pedidos y se hace responsable de los errores operativos.", category: "reliability", weightBasisPoints: 1667 },
-  { code: "customer_experience", name: "Atención y experiencia del cliente", description: "Escucha, explica con claridad y mantiene un servicio amable y profesional.", category: "service", weightBasisPoints: 1667 },
-  { code: "menu_knowledge", name: "Conocimiento de carta y recomendación", description: "Conoce comidas, ingredientes, alérgenos, tragos y vinos, y recomienda sin inventar información.", category: "knowledge", weightBasisPoints: 1667 },
-  { code: "teamwork", name: "Comunicación, compañerismo y trabajo en equipo", description: "Informa a tiempo, coordina con salón, barra y caja, y apoya al equipo bajo presión.", category: "teamwork", weightBasisPoints: 1666 },
-  { code: "continuous_improvement", name: "Autocrítica, aprendizaje y mejora continua", description: "Reconoce errores, acepta correcciones y demuestra avances sin repetir las mismas fallas.", category: "improvement", weightBasisPoints: 1666 },
+  { code: "discipline", name: "Disciplina, puntualidad y presentación", description: "Llega a tiempo, cumple horarios, mantiene uniforme y presentación adecuados, respeta normas y permanece preparado durante el turno.", category: "discipline", weightBasisPoints: 1667 },
+  { code: "operational_responsibility", name: "Responsabilidad y precisión operativa", description: "Toma comandas correctamente, confirma pedidos, evita errores, cumple sus tareas de apertura y cierre, y se hace responsable de lo que le corresponde.", category: "reliability", weightBasisPoints: 1667 },
+  { code: "customer_experience", name: "Atención y experiencia del cliente", description: "Recibe con amabilidad, escucha, explica con claridad, anticipa necesidades, maneja reclamos correctamente y mantiene un servicio profesional.", category: "service", weightBasisPoints: 1667 },
+  { code: "menu_knowledge", name: "Conocimiento de carta y recomendación", description: "Conoce comidas, ingredientes, alérgenos, tragos y vinos; puede explicarlos con fluidez y recomendar opciones apropiadas sin inventar información.", category: "knowledge", weightBasisPoints: 1667 },
+  { code: "teamwork", name: "Comunicación, compañerismo y trabajo en equipo", description: "Informa oportunamente, coordina con salón, barra y caja, ayuda cuando un compañero está sobrecargado y evita conflictos o comentarios perjudiciales.", category: "teamwork", weightBasisPoints: 1666 },
+  { code: "continuous_improvement", name: "Autocrítica, aprendizaje y mejora continua", description: "Reconoce errores, acepta correcciones, evita repetirlos, pregunta cuando desconoce algo y demuestra avances reales durante el período evaluado.", category: "improvement", weightBasisPoints: 1666 },
 ] as const;
 
 export async function openEvaluationCycle(
