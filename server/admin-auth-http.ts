@@ -177,19 +177,22 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       const recoveryUnlocked = !bootstrap.allowed && await dependencies.verifyRecoveryGrant(cookieValue(request, RECOVERY_COOKIE_NAME));
       const organizationUsers = session?.users ?? [];
       const users = actor?.role === "admin" ? organizationUsers : [];
-      const team = organizationUsers.map((member) => ({
-        id: member.id,
-        displayName: member.displayName,
-        status: member.status,
-        role: member.role,
-        jobTitle: member.jobTitle,
-        tipFactorHundredths: member.tipFactorHundredths,
-        email: member.email,
-        phone: member.phone,
-        bio: member.bio,
-        hiredOn: member.hiredOn,
-        hasAvatar: member.hasAvatar,
-      }));
+      const team = organizationUsers.map((member) => {
+        const mayReadPrivateProfile = actor?.role === "admin" || actor?.userId === member.id;
+        return {
+          id: member.id,
+          displayName: member.displayName,
+          status: member.status,
+          role: member.role,
+          jobTitle: member.jobTitle,
+          tipFactorHundredths: member.tipFactorHundredths,
+          email: mayReadPrivateProfile ? member.email : null,
+          phone: mayReadPrivateProfile ? member.phone : null,
+          bio: mayReadPrivateProfile ? member.bio : null,
+          hiredOn: mayReadPrivateProfile ? member.hiredOn : null,
+          hasAvatar: member.hasAvatar,
+        };
+      });
       return json({
         ok: true,
         bootstrapAllowed: bootstrap.allowed,

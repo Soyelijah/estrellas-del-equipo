@@ -109,15 +109,27 @@ test("status exposes bootstrap state but never password hashes or session tokens
   assert.deepEqual(await response.json(), { ok: true, bootstrapAllowed: true, setupUnlocked: false, recoveryUnlocked: false, account: null, users: [], team: [] });
 });
 
-test("exposes a sanitized team to workers without administrative login identifiers", async () => {
-  const team = [{ id: "u1", displayName: "Garzón", loginIdentifier: "garzon.privado", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }];
+test("exposes a sanitized team to workers without other members' private data", async () => {
+  const team = [
+    { id: "u1", displayName: "Garzón", loginIdentifier: "garzon.privado", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65, email: "garzon@example.com", phone: "+56911111111", bio: "Servicio de salón", hiredOn: "2024-01-01", hasAvatar: true },
+    { id: "u2", displayName: "Compañera", loginIdentifier: "companera.privada", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75, email: "companera@example.com", phone: "+56922222222", bio: "Servicio de barra", hiredOn: "2023-01-01", hasAvatar: false },
+  ];
   const response = await handleAdminAuthRequest(new Request("https://equipo.example/api/auth/status", { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository: {
     async findSessionSnapshot() { return { actor: { userId: "u1", displayName: "Garzón", role: "worker", organizationId: "o1", membershipId: "m1" }, users: team }; },
   } }));
   const body = await response.json();
   assert.deepEqual(body.users, []);
-  assert.deepEqual(body.team, [{ id: "u1", displayName: "Garzón", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }]);
-  assert.equal(JSON.stringify(body).includes("garzon.privado"), false);
+  assert.deepEqual(body.team, [
+    { id: "u1", displayName: "Garzón", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65, email: "garzon@example.com", phone: "+56911111111", bio: "Servicio de salón", hiredOn: "2024-01-01", hasAvatar: true },
+    { id: "u2", displayName: "Compañera", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75, email: null, phone: null, bio: null, hiredOn: null, hasAvatar: false },
+  ]);
+  const serialized = JSON.stringify(body);
+  assert.equal(serialized.includes("garzon.privado"), false);
+  assert.equal(serialized.includes("companera.privada"), false);
+  assert.equal(serialized.includes("companera@example.com"), false);
+  assert.equal(serialized.includes("+56922222222"), false);
+  assert.equal(serialized.includes("Servicio de barra"), false);
+  assert.equal(serialized.includes("2023-01-01"), false);
 });
 
 test("loads authenticated status through one session snapshot without sequential user queries", async () => {
@@ -142,7 +154,7 @@ test("loads authenticated status through one session snapshot without sequential
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.deepEqual(body.account, { userId: "u1", displayName: "Roberto", role: "worker" });
-  assert.deepEqual(body.team, [{ id: "u2", displayName: "Compañera", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75 }]);
+  assert.deepEqual(body.team, [{ id: "u2", displayName: "Compañera", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75, email: null, phone: null, bio: null, hiredOn: null }]);
 });
 
 test("reports a valid scoped recovery grant only after administrator setup is closed", async () => {
