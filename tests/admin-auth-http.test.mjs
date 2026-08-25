@@ -30,6 +30,7 @@ function dependencies(overrides = {}) {
       async findUserAvatar() { return null; },
       async findAdministratorCredential() { return { passwordHash: "password-hash" }; },
       async resetSystem() { return { reset: true }; },
+      async purgeOperationalHistory() { return { purged: true }; },
       async findSessionActor() { return null; },
       async findSessionSnapshot() { return null; },
       async revokeSession() {},
@@ -492,6 +493,14 @@ test("requires session, unique key, current password and exact phrase for a tota
   assert.equal(response.status, 200);
   assert.equal(resets, 1);
   assert.match(response.headers.get("set-cookie"), /^estrellas_session=; Path=\/; HttpOnly; SameSite=Strict; Max-Age=0; Secure$/);
+});
+
+test("requires administrator session and the unique setup key for an operational history purge", async () => {
+  const headers = { cookie: "estrellas_session=private-cookie-token" };
+  const actor = { async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m1" }; } };
+  const accepted = await handleAdminAuthRequest(mutation("/api/admin/system/purge-history", { accessKey: "unique-key", password: "password", confirmation: "BORRAR HISTORIAL OPERATIVO" }, headers), dependencies({ repository: actor, verifySetupAccessKey: async () => true }));
+  const rejectedKey = await handleAdminAuthRequest(mutation("/api/admin/system/purge-history", { accessKey: "wrong", password: "password", confirmation: "BORRAR HISTORIAL OPERATIVO" }, headers), dependencies({ repository: actor, verifySetupAccessKey: async () => false }));
+  assert.deepEqual([accepted.status, rejectedKey.status], [200, 401]);
 });
 
 test("distinguishes a rejected reset key from a rejected current password for the signed-in administrator", async () => {

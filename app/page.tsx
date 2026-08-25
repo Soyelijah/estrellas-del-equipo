@@ -411,6 +411,8 @@ export default function Home() {
       invalid_profile: "Revisa el correo, teléfono, biografía y fecha de ingreso.",
       invalid_avatar: "La foto no es válida o supera el tamaño permitido.",
       invalid_reset_confirmation: "Escribe exactamente la frase de reinicio solicitada.",
+      invalid_history_purge_confirmation: "Escribe exactamente BORRAR HISTORIAL OPERATIVO.",
+      history_purge_failed: "No se pudo limpiar el historial operativo.",
       invalid_reset_access_key: "La clave única de configuración inicial no es correcta.",
       invalid_reset_password: "La contraseña actual del administrador no es correcta.",
       invalid_reset_authorization: "No fue posible autorizar el reinicio con esas credenciales.",
@@ -631,19 +633,23 @@ export default function Home() {
       setSubmitting(false);
     }
   }
-  async function resetAll(event: FormEvent<HTMLFormElement>) {
+  async function purgeHistory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);
     setMessage("");
     try {
-      const { response, result } = await requestJson("/api/admin/system/reset", "POST", Object.fromEntries(new FormData(event.currentTarget)));
+      const form = event.currentTarget;
+      const { response, result } = await requestJson("/api/admin/system/purge-history", "POST", Object.fromEntries(new FormData(form)));
       if (!response.ok) return setMessage(friendlyError(result.error));
-      setSelectedUserId(null);
-      setView("inicio");
-      setMessage("");
+      form.reset();
+      setAuditEvents([]);
+      setOperations(null);
+      setWorkspace(null);
+      setShiftConfirmation(null);
       await refreshAuth();
+      setMessage("Historial operativo eliminado. Las cuentas, perfiles, credenciales y porcentajes permanecen intactos.");
     } catch {
-      setMessage("No se pudo completar el reinicio seguro.");
+      setMessage("No se pudo completar la limpieza protegida.");
     } finally {
       setSubmitting(false);
     }
@@ -1151,7 +1157,7 @@ export default function Home() {
             submitAdmin={submitAdmin}
             changeStatus={changeStatus}
             deleteUser={deleteUser}
-            resetAll={resetAll}
+            purgeHistory={purgeHistory}
           />
         )}
         {isAdmin && currentView === "operacion" && (
@@ -1798,7 +1804,7 @@ function TeamAdmin({
   submitAdmin,
   changeStatus,
   deleteUser,
-  resetAll,
+  purgeHistory,
 }: {
   users: StoredUser[];
   selectedUser: StoredUser | null;
@@ -1811,7 +1817,7 @@ function TeamAdmin({
   ): Promise<void>;
   changeStatus(user: StoredUser): Promise<void>;
   deleteUser(user: StoredUser, confirmation: string): Promise<boolean>;
-  resetAll(event: FormEvent<HTMLFormElement>): Promise<void>;
+  purgeHistory(event: FormEvent<HTMLFormElement>): Promise<void>;
 }) {
   const [deleteTarget, setDeleteTarget] = useState<StoredUser | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
@@ -1997,11 +2003,11 @@ function TeamAdmin({
           </form>
         </div>
       )}
-      <form className="panel reset-zone" onSubmit={(event) => void resetAll(event)}>
+      <form className="panel reset-zone history-purge-zone" onSubmit={(event) => void purgeHistory(event)}>
         <div>
-          <span className="section-kicker">ZONA DE REINICIO</span>
-          <h3>Volver a una instalación vacía</h3>
-          <p>Elimina permanentemente la cuenta administradora, trabajadores, turnos, evaluaciones, propinas, sesiones y auditoría. Después aparecerá nuevamente la creación del primer administrador.</p>
+          <span className="section-kicker">LIMPIEZA OPERATIVA</span>
+          <h3>Empezar evaluaciones desde cero</h3>
+          <p>Elimina ciclos, criterios, turnos, evaluaciones, resultados, acuerdos históricos y auditoría. Conserva administrador, trabajadores, perfiles, credenciales y porcentajes.</p>
         </div>
         <div className="reset-fields">
           <label>
@@ -2016,11 +2022,11 @@ function TeamAdmin({
           </label>
           <label>
             Confirmación exacta
-            <input name="confirmation" required autoComplete="off" placeholder="ELIMINAR TODO Y REINICIAR" />
+            <input name="confirmation" required autoComplete="off" placeholder="BORRAR HISTORIAL OPERATIVO" />
             <small>Escribe la frase completa tal como aparece.</small>
           </label>
         </div>
-        <button className="danger-action" disabled={submitting}>Eliminar todo y volver a cero</button>
+        <button className="danger-action" disabled={submitting}>Borrar historial operativo</button>
       </form>
     </section>
   );

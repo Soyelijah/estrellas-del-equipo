@@ -1,4 +1,4 @@
-import { bootstrapAdministrator, createManagedUser, deleteManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, resetSystem, setManagedUserStatus, updateManagedUser, updateUserAvatar, updateUserProfile } from "./admin-auth-service.ts";
+import { bootstrapAdministrator, createManagedUser, deleteManagedUser, loginWithPassword, purgeOperationalHistory, recoverAdministratorPassword, resetManagedUserPassword, resetSystem, setManagedUserStatus, updateManagedUser, updateUserAvatar, updateUserProfile } from "./admin-auth-service.ts";
 import { closeEvaluationCycle, deleteEvaluationCyclePermanently, deleteEvaluationShift, moderateEvaluationSubmission, openEvaluationCycle, registerEvaluationShift, voidMemberEvaluationHistory } from "./evaluation-admin-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
@@ -25,6 +25,7 @@ type AuthDependencies = {
     findUserAvatar(userId: string, organizationId: string): Promise<{ mimeType: string; base64: string; updatedAt: string } | null>;
     findAdministratorCredential(userId: string, organizationId: string): Promise<{ passwordHash: string } | null>;
     resetSystem(record: Record<string, string>): Promise<{ reset: boolean }>;
+    purgeOperationalHistory(record: Record<string, string>): Promise<{ purged: boolean }>;
     findSessionActor(tokenHash: string, now: string): Promise<{ userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string } | null>;
     findSessionSnapshot(tokenHash: string, now: string): Promise<{
       actor: { userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string };
@@ -378,6 +379,15 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       return result.ok
         ? json({ ok: true }, result.status, { "set-cookie": sessionCookie(request, "", true) })
         : json({ ok: false, error: result.error }, result.status);
+    }
+    if (path === "/api/admin/system/purge-history") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      if (!dependencies.setupAccessConfigured || !await dependencies.verifySetupAccessKey(parsed.body.accessKey)) {
+        return json({ ok: false, error: "invalid_reset_access_key" }, 401);
+      }
+      const result = await purgeOperationalHistory(parsed.body as never, actor, serviceDependencies);
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
     }
     if (path === "/api/account/profile" || path === "/api/account/avatar") {
       const actor = await actorFor(request, dependencies);

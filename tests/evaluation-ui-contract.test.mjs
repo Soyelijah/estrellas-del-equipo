@@ -91,14 +91,19 @@ test("keeps complete profiles in each worker account, with guarded reset and kio
   assert.match(page, /name="hiredOn"/);
   assert.match(page, /name="bio"/);
   assert.match(page, /accept="image\/jpeg,image\/png,image\/webp"/);
-  assert.match(page, /ELIMINAR TODO Y REINICIAR/);
-  assert.match(page, /\/api\/admin\/system\/reset/);
   assert.match(page, /addEventListener\("contextmenu", preventContextMenu\)/);
   assert.match(styles, /body \{[^}]*user-select: none/);
   assert.match(styles, /input, textarea, \[contenteditable="true"\][^{]*\{[^}]*user-select: text/);
   assert.match(page, /name="password" type="password" required minLength=\{12\}/);
   assert.match(page, /name="accessKey" type="password" required minLength=\{12\}/);
   assert.match(page, /Clave única de configuración inicial/);
+});
+
+test("offers a protected operational purge that explicitly preserves accounts", () => {
+  assert.match(page, /BORRAR HISTORIAL OPERATIVO/);
+  assert.match(page, /Conserva administrador, trabajadores, perfiles, credenciales y porcentajes/);
+  assert.match(page, /\/api\/admin\/system\/purge-history/);
+  assert.doesNotMatch(page, /Eliminar todo y volver a cero/);
 });
 
 test("styles every credential reset form as a complete responsive control", () => {

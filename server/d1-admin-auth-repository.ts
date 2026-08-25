@@ -1002,6 +1002,47 @@ export class D1AdminAuthRepository {
     return { reset: true };
   }
 
+  async purgeOperationalHistory(rawRecord: Record<string, string>) {
+    const organizationId = rawRecord.organizationId;
+    await this.database.batch([
+      this.database.prepare("DELETE FROM audit_events WHERE organization_id = ?").bind(organizationId),
+      this.database.prepare("DELETE FROM review_requests WHERE organization_id = ?").bind(organizationId),
+      this.database.prepare("DELETE FROM integrity_alerts WHERE organization_id = ?").bind(organizationId),
+      this.database.prepare("DELETE FROM result_snapshots WHERE organization_id = ?").bind(organizationId),
+      this.database.prepare(`
+        DELETE FROM rating_observations WHERE submission_id IN (
+          SELECT id FROM evaluation_submissions WHERE organization_id = ?
+        )
+      `).bind(organizationId),
+      this.database.prepare("DELETE FROM evaluation_submissions WHERE organization_id = ?").bind(organizationId),
+      this.database.prepare(`
+        DELETE FROM shift_assignments WHERE shift_id IN (
+          SELECT id FROM shifts WHERE organization_id = ?
+        )
+      `).bind(organizationId),
+      this.database.prepare("DELETE FROM shifts WHERE organization_id = ?").bind(organizationId),
+      this.database.prepare(`
+        DELETE FROM evaluation_participations WHERE period_id IN (
+          SELECT id FROM evaluation_periods WHERE organization_id = ?
+        )
+      `).bind(organizationId),
+      this.database.prepare("DELETE FROM evaluation_periods WHERE organization_id = ?").bind(organizationId),
+      this.database.prepare(`
+        DELETE FROM criteria WHERE policy_version_id IN (
+          SELECT id FROM policy_versions WHERE organization_id = ?
+        )
+      `).bind(organizationId),
+      this.database.prepare("DELETE FROM policy_versions WHERE organization_id = ?").bind(organizationId),
+      this.database.prepare(`
+        DELETE FROM tip_agreement_participants WHERE agreement_id IN (
+          SELECT id FROM tip_agreements WHERE organization_id = ?
+        )
+      `).bind(organizationId),
+      this.database.prepare("DELETE FROM tip_agreements WHERE organization_id = ?").bind(organizationId),
+    ]);
+    return { purged: true as const };
+  }
+
   async listAuditEvents(organizationId: string, limit: number) {
     const boundedLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
     const rows = await this.database.prepare(`
