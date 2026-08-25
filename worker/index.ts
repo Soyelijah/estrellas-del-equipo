@@ -1,4 +1,4 @@
-/** Cloudflare Worker entry point for the vinext-starter template. */
+/** Cloudflare Worker entry point for the Estrellas del Equipo application. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { D1EvaluationRepository } from "../server/d1-evaluation-repository";
@@ -29,7 +29,7 @@ interface ExecutionContext {
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
 // To route SVGs through the optimizer (with security headers), set
-// dangerouslyAllowSVG: true in next.config.js and uncomment below:
+// dangerouslyAllowSVG: true in next.config.ts and uncomment below:
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 function withSecurityHeaders(request: Request, response: Response): Response {

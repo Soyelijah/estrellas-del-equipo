@@ -1,8 +1,8 @@
-# vinext-starter
+# Estrellas del Equipo
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Aplicación full-stack para evaluaciones privadas del equipo y una distribución
+transparente de propinas. Se ejecuta con
+[vinext](https://github.com/cloudflare/vinext), Cloudflare D1 y Drizzle.
 
 ## Prerequisites
 
@@ -13,7 +13,8 @@ Drizzle support.
 
 The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
 
-This starter does not use `wrangler.jsonc`.
+La configuración local de Cloudflare está en `wrangler.jsonc`: apunta al Worker
+`worker/index.ts` y declara el binding D1 `DB`.
 
 `install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout and then validates the Sites artifact. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
 
@@ -21,14 +22,24 @@ Scripts that need writable project-scoped home, npm, XDG, and temporary paths us
 
 ## Included Shape
 
-- edit site code under `app/`
+- la interfaz vive en `app/`
+- las reglas de dominio y los controladores HTTP viven en `domain/` y `server/`
+- `worker/index.ts` conecta las rutas API, D1 y el runtime de vinext
+- `drizzle/` contiene las migraciones versionadas de D1
 - `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
 - `.openai/hosting.json` declares optional Sites D1 and R2 bindings
 - `vite.config.ts` simulates declared bindings for local development
 - `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
+- `db/schema.ts` define el esquema de datos de la aplicación
 - `examples/d1/` contains an optional D1 example surface
 - `drizzle.config.ts` supports local migration generation when needed
+
+## Aviso para implementaciones locales
+
+Si este repositorio ya está instalado en otro entorno local, revisa
+[`docs/LOCAL_IMPLEMENTATION_NOTICE.md`](docs/LOCAL_IMPLEMENTATION_NOTICE.md)
+antes de desplegar: incluye los pasos para actualizar el checkout, validar las
+migraciones y comprobar el cambio de seguridad de los verbos HTTP.
 
 ## Workspace Auth Headers
 

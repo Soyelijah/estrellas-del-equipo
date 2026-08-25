@@ -87,6 +87,54 @@ function recoveryCookie(request: Request, token: string, clear = false): string 
   return `${RECOVERY_COOKIE_NAME}=${clear ? "" : token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${clear ? 0 : 600}${secure}`;
 }
 
+function methodNotAllowed(allow: string): Response {
+  return json(
+    { ok: false, error: "method_not_allowed" },
+    405,
+    { allow },
+  );
+}
+
+function allowedMethodsForPath(path: string): string[] | null {
+  if (
+    path === "/api/auth/status" ||
+    path === "/api/admin/audit" ||
+    path === "/api/admin/evaluation-operations" ||
+    /^\/api\/users\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/avatar$/iu.test(path)
+  ) {
+    return ["GET"];
+  }
+
+  if (
+    path === "/api/admin/evaluation-cycles" ||
+    path === "/api/admin/evaluation-shifts" ||
+    path === "/api/auth/bootstrap/unlock" ||
+    path === "/api/auth/bootstrap" ||
+    path === "/api/auth/recovery/unlock" ||
+    path === "/api/auth/recovery/complete" ||
+    path === "/api/auth/login" ||
+    path === "/api/auth/logout" ||
+    path === "/api/admin/system/reset" ||
+    path === "/api/admin/users" ||
+    /^\/api\/admin\/evaluation-cycles\/[^/]+\/close$/.test(path)
+  ) {
+    return ["POST"];
+  }
+
+  if (path === "/api/account/profile") return ["PATCH"];
+  if (path === "/api/account/avatar") return ["POST", "DELETE"];
+  if (/^\/api\/admin\/evaluation-shifts\/[^/]+$/.test(path)) return ["DELETE"];
+  if (/^\/api\/admin\/evaluation-submissions\/[^/]+\/status$/.test(path)) return ["PATCH"];
+  if (/^\/api\/admin\/evaluation-history\/[^/]+$/.test(path)) return ["DELETE"];
+  if (/^\/api\/admin\/evaluation-cycles\/[^/]+$/.test(path)) return ["DELETE"];
+
+  const userRoute = path.match(/^\/api\/admin\/users\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?:\/(status|password|profile|avatar))?$/iu);
+  if (!userRoute) return null;
+  if (!userRoute[1]) return ["PATCH"];
+  if (userRoute[1] === "avatar") return ["POST", "DELETE"];
+  return userRoute[1] === "profile" ? ["PATCH"] : ["POST"];
+}
+
 async function readBody(request: Request, maxBytes = MAX_JSON_BYTES): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; response: Response }> {
   const declared = Number(request.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, response: json({ ok: false, error: "payload_too_large" }, 413) };
@@ -110,6 +158,11 @@ async function actorFor(request: Request, dependencies: AuthDependencies) {
 export async function handleAdminAuthRequest(request: Request, dependencies: AuthDependencies): Promise<Response> {
   const path = new URL(request.url).pathname;
   try {
+    const allowedMethods = allowedMethodsForPath(path);
+    if (allowedMethods && !allowedMethods.includes(request.method)) {
+      return methodNotAllowed(allowedMethods.join(", "));
+    }
+
     if (path === "/api/auth/status" && request.method === "GET") {
       const token = cookieValue(request);
       const tokenHash = token ? await dependencies.hashToken(token) : null;
@@ -174,7 +227,7 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       return json({ ok: true, operations: await dependencies.repository.getEvaluationOperations(actor.organizationId) });
     }
 
-    if (request.method !== "POST" && request.method !== "PATCH" && request.method !== "DELETE") return json({ ok: false, error: "method_not_allowed" }, 405, { allow: "GET, POST, PATCH, DELETE" });
+    if (request.method !== "POST" && request.method !== "PATCH" && request.method !== "DELETE") return methodNotAllowed("GET, POST, PATCH, DELETE");
     if (!isSameOriginMutation(request)) return json({ ok: false, error: "cross_origin_request" }, 403);
     const parsed = await readBody(request, path.endsWith("/avatar") ? MAX_AVATAR_JSON_BYTES : MAX_JSON_BYTES);
     if (!parsed.ok) return parsed.response;

@@ -72,7 +72,7 @@ test("rejects invalid JSON without exposing parser details", async () => {
   assert.deepEqual(await response.json(), { ok: false, error: "invalid_json" });
 });
 
-test("loads a workers real evaluation workspace from their password session", async () => {
+test("loads a worker's real evaluation workspace from their password session", async () => {
   const workspace = {
     period: { id: "period-1", name: "Servicio agosto", endsAt: "2026-08-31T23:59:59.000Z" },
     criteria: [{ id: "criterion-1", name: "Trabajo en equipo", description: "Coopera durante el turno", category: "teamwork" }],

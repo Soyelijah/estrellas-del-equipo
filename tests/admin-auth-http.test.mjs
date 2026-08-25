@@ -204,6 +204,45 @@ test("cross-origin mutations are rejected before account changes", async () => {
   assert.deepEqual(await response.json(), { ok: false, error: "cross_origin_request" });
 });
 
+test("rejects every unsupported sensitive-route verb before parsing a body or calling services", async () => {
+  let repositoryCalls = 0;
+  const repository = {
+    async findLoginAccount() { repositoryCalls += 1; return null; },
+    async findSessionActor() { repositoryCalls += 1; return null; },
+    async openEvaluationCycle() { repositoryCalls += 1; return { created: true }; },
+    async closeEvaluationCycle() { repositoryCalls += 1; return { updated: true }; },
+    async deleteEvaluationShift() { repositoryCalls += 1; return { deleted: true }; },
+    async setEvaluationSubmissionStatus() { repositoryCalls += 1; return { updated: true }; },
+    async voidEvaluationHistory() { repositoryCalls += 1; return { updated: true, count: 0 }; },
+  };
+
+  const identifier = "11111111-1111-4111-8111-111111111111";
+  const cases = [
+    ["/api/auth/login", "PATCH", "POST"],
+    ["/api/admin/evaluation-cycles", "DELETE", "POST"],
+    [`/api/admin/evaluation-cycles/${identifier}/close`, "PATCH", "POST"],
+    [`/api/admin/evaluation-shifts/${identifier}`, "PATCH", "DELETE"],
+    [`/api/admin/evaluation-submissions/${identifier}/status`, "POST", "PATCH"],
+    [`/api/admin/evaluation-history/${identifier}`, "POST", "DELETE"],
+  ];
+
+  for (const [path, method, allow] of cases) {
+    const response = await handleAdminAuthRequest(
+      new Request(`https://equipo.example${path}`, {
+        method,
+        headers: { origin: "https://equipo.example", "content-type": "application/json" },
+        body: "{",
+      }),
+      dependencies({ repository }),
+    );
+
+    assert.equal(response.status, 405, `${method} ${path}`);
+    assert.equal(response.headers.get("allow"), allow, `${method} ${path}`);
+    assert.deepEqual(await response.json(), { ok: false, error: "method_not_allowed" });
+  }
+  assert.equal(repositoryCalls, 0);
+});
+
 test("routes worker edit, lifecycle, and password reset only through an administrator session", async () => {
   const userId = "11111111-1111-4111-8111-111111111111";
   const admin = { async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m1" }; } };
@@ -368,7 +407,7 @@ test("permanently deletes only a confirmed legacy cycle through an administrator
   });
 });
 
-test("lets only an administrator moderate one evaluation and bulk-void a persons history", async () => {
+test("lets only an administrator moderate one evaluation and bulk-void a person's history", async () => {
   const adminActor = { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "11111111-1111-4111-8111-111111111111" };
   const workerActor = { ...adminActor, role: "worker", membershipId: "22222222-2222-4222-8222-222222222222" };
   const calls = [];
