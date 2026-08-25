@@ -619,7 +619,21 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
 
 @media (max-width: 1200px) { .credential-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 900px) { .admin-workbench, .worker-card-grid, .credential-grid { grid-template-columns: 1fr; }.admin-hero, .worker-hero { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .service-constellation { display: none; }.service-rail .access-brand { padding-bottom: 8px; }.service-desk { min-height: calc(100vh - 120px); }.worker-actions > button { flex: 1; }.admin-workbench { gap: 12px; } }
+@media (max-width: 760px) {
+  .service-constellation { display: none; }
+  .service-rail .access-brand { padding-bottom: 8px; }
+  .service-desk { min-height: calc(100vh - 120px); }
+  .worker-actions > button { flex: 1; }
+  .admin-workbench { gap: 12px; }
+  .credential-grid { gap: 10px; margin-top: 12px; }
+  .credential-card { grid-template-columns: minmax(0,1fr) minmax(138px,.42fr); grid-template-rows: auto auto; gap: 9px 12px; padding: 13px 14px; border-radius: 14px; }
+  .credential-card::before { right: 14px; left: 14px; }
+  .credential-card .worker-identity { grid-column: 1 / -1; padding-bottom: 8px; }
+  .credential-card label { gap: 5px; font-size: 9px; }
+  .credential-card input { min-height: 40px; padding: 8px 11px; border-radius: 9px; }
+  .credential-note { font-size: 7px; line-height: 1.35; }
+  .credential-card .primary { align-self: end; width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border-radius: 9px; font-size: 10px; }
+}
 
 /* Live service command center */
 .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }

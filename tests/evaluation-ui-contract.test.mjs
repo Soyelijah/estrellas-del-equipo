@@ -107,6 +107,12 @@ test("styles every credential reset form as a complete responsive control", () =
   assert.match(styles, /\.credential-card input:focus-visible/);
 });
 
+test("keeps credential actions compact and touch-safe on mobile", () => {
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.credential-card \{[^}]*grid-template-columns: minmax\(0,1fr\) minmax\(138px,\.42fr\)/);
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.credential-card input \{[^}]*min-height: 40px/);
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.credential-card \.primary \{[^}]*min-height: 40px/);
+});
+
 test("turns the mobile service navigation into a complete tab deck without horizontal scrolling", () => {
   assert.match(page, /aria-current=\{currentView === item\.id \? "page" : undefined\}/);
   assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav \{[^}]*grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
