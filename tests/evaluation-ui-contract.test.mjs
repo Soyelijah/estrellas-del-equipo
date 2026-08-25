@@ -140,6 +140,14 @@ test("presents login and administrator recovery in an accessible expanding conso
   assert.match(styles, /prefers-reduced-motion: reduce/);
 });
 
+test("presents the recovery exit as a clear secondary action", () => {
+  assert.match(page, /className="recovery-back-action"/);
+  assert.match(page, /className="recovery-back-icon"/);
+  assert.match(page, /className="recovery-back-copy"/);
+  assert.match(styles, /\.recovery-back-action:hover/);
+  assert.match(styles, /\.recovery-back-action:focus-visible/);
+});
+
 test("separates the long administrator evaluation page into focused categories", () => {
   assert.match(page, /className="operation-sections"/);
   assert.match(page, /operationSection === "cycle"/);

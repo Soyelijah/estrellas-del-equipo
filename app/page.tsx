@@ -1436,11 +1436,20 @@ function AccessGate({
             />
             <SubmitButton busy={submitting} label="Autorizar recuperación" />
             <button
-              className="text-action"
+              className="recovery-back-action"
               type="button"
               onClick={() => setMode("login")}
             >
-              Volver al inicio de sesión
+              <span className="recovery-back-icon" aria-hidden="true">
+                ←
+              </span>
+              <span className="recovery-back-copy">
+                <small>Salir de recuperación</small>
+                <strong>Volver al inicio de sesión</strong>
+              </span>
+              <span className="recovery-back-chevron" aria-hidden="true">
+                ◇
+              </span>
             </button>
             {message && (
               <p className="form-message" role="status">
