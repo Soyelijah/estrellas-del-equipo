@@ -501,12 +501,13 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
 @media (max-width: 760px) {
   .app-shell { display: block; }
   .demo-banner { align-items: flex-start; flex-direction: column; gap: 4px; }
-  .sidebar { position: static; width: 100%; height: auto; padding: 14px 14px 10px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .brand { padding-bottom: 10px; }.brand-mark { width: 35px; height: 35px; font-size: 38px; }
+  .sidebar { position: relative; width: 100%; height: auto; padding: 13px 14px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .brand { padding: 0 5px 11px; }.brand-mark { width: 35px; height: 35px; font-size: 38px; }
   .role-switch { margin-bottom: 8px; }
-  nav { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
-  nav button { min-width: max-content; padding: 9px 11px; font-size: 11px; }
-  nav button span { width: auto; font-size: 16px; }
+  .service-rail nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; overflow: visible; padding: 7px; border: 1px solid rgba(200,155,69,.19); border-radius: 16px; background: rgba(255,255,255,.035); box-shadow: inset 0 1px rgba(255,255,255,.035),0 10px 26px rgba(0,0,0,.12); }
+  .service-rail nav button { justify-content: center; min-width: 0; min-height: 46px; gap: 7px; padding: 8px 6px; border: 1px solid transparent; border-radius: 11px; text-align: center; font-size: 9.5px; white-space: nowrap; transition: transform .2s ease,background .2s ease,border-color .2s ease,box-shadow .2s ease; }
+  .service-rail nav button span { flex: 0 0 auto; width: 17px; font-size: 15px; }
+  .service-rail nav button.active { border-color: rgba(200,155,69,.42); background: linear-gradient(135deg,rgba(110,38,56,.95),rgba(80,31,42,.92)); box-shadow: inset 0 1px rgba(255,255,255,.07),0 6px 16px rgba(13,6,5,.18); transform: translateY(-1px); }
   .sidebar-note, .profile { display: none; }
   .content { padding: 20px 14px 35px; }
   .topbar { align-items: flex-start; }.topbar h1 { font-size: 27px; }.top-actions .icon-button, .top-actions .outline { display: none; }
@@ -527,6 +528,13 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
   .tip-simulator-head { align-items: stretch; flex-direction: column; }.tip-simulator-head label > span { min-width: 0; }.tip-simulation-grid { grid-template-columns: 1fr; }
   .data-banner { align-items: flex-start; flex-direction: column; gap: 3px; }
   .real-data-hero { grid-template-columns: 1fr; }.setup-card { margin: 0 18px 18px; }
+}
+
+@media (max-width: 420px) {
+  .sidebar { padding-inline: 10px; }
+  .service-rail nav { gap: 4px; padding: 5px; }
+  .service-rail nav button { gap: 4px; padding-inline: 4px; font-size: 8.5px; }
+  .service-rail nav button span { width: 14px; font-size: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -107,6 +107,13 @@ test("styles every credential reset form as a complete responsive control", () =
   assert.match(styles, /\.credential-card input:focus-visible/);
 });
 
+test("turns the mobile service navigation into a complete tab deck without horizontal scrolling", () => {
+  assert.match(page, /aria-current=\{currentView === item\.id \? "page" : undefined\}/);
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav \{[^}]*grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav button \{[^}]*min-width: 0/);
+  assert.doesNotMatch(styles, /@media \(max-width: 760px\)[\s\S]*?nav \{[^}]*overflow-x: auto/);
+});
+
 test("gives the administrator audited controls over evaluation history", () => {
   assert.match(page, /Historial de evaluaciones/);
   assert.match(page, /ANULAR HISTORIAL/);

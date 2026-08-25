@@ -1067,6 +1067,7 @@ export default function Home() {
             <button
               key={item.id}
               className={currentView === item.id ? "active" : ""}
+              aria-current={currentView === item.id ? "page" : undefined}
               onClick={() => {
                 setView(item.id as AppView);
                 if (item.id === "auditoria") void loadAudit();
