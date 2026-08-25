@@ -120,11 +120,19 @@ test("presents login and administrator recovery in an accessible expanding conso
       page.indexOf('className="access-console-body"'),
   );
   assert.match(styles, /\.access-console:hover \.access-console-body/);
-  assert.match(styles, /--console-open-duration: 1\.8s/);
+  assert.match(styles, /--console-open-duration: 1\.5s/);
   assert.match(styles, /--console-open-delay: \.18s/);
   assert.match(
     styles,
-    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.access-console-body \{[\s\S]*?--console-open-duration: 1\.8s/,
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.access-console-body \{[\s\S]*?--console-open-duration: 1\.5s/,
+  );
+  assert.match(
+    styles,
+    /\.premium-access \.access-form label \{[^}]*caret-color: transparent;[^}]*user-select: none;/,
+  );
+  assert.match(
+    styles,
+    /\.premium-access \.access-form input \{[^}]*caret-color: var\(--access-brass\);[^}]*user-select: text;/,
   );
   assert.match(styles, /\.access-console-trigger:hover \.console-lock::before/);
   assert.match(styles, /@media \(max-width: 900px\)/);

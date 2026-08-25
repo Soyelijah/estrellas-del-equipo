@@ -278,7 +278,7 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
 .premium-access .access-intro h1 { max-width: 720px; color: var(--access-ink); font-size: clamp(48px, 6.6vw, 86px); font-weight: 430; line-height: .95; text-wrap: balance; }.premium-access .access-intro > p { color: var(--access-muted); font-size: 13px; }.premium-access .access-kicker { color: var(--access-brass); }.premium-access .access-kicker::before { background: var(--access-wine); box-shadow: 0 0 14px rgba(127,43,62,.7); }.premium-access .access-trust { color: #c7b8a8; }.premium-access .access-trust span::before { color: var(--access-brass); }
 .premium-access .access-form { position: relative; gap: 16px; overflow: hidden; padding: clamp(26px, 3.4vw, 38px); border: 1px solid rgba(236,216,190,.19); border-top: 1px solid rgba(236,216,190,.3); border-radius: 24px; background: linear-gradient(145deg, rgba(54,44,39,.82), rgba(29,24,22,.91)); box-shadow: 0 36px 90px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.06); -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px); }
 .access-console {
-  --console-open-duration: 1.8s;
+  --console-open-duration: 1.5s;
   --console-open-delay: .18s;
   position: relative;
   width: min(470px,100%);
@@ -353,7 +353,26 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
 .premium-access .access-form::before { content: ""; position: absolute; width: 190px; height: 190px; right: -105px; top: -115px; border: 1px solid rgba(216,173,92,.22); border-radius: 50%; box-shadow: 0 0 45px rgba(216,173,92,.05); }
 .access-form-heading { display: flex; align-items: flex-start; gap: 14px; }.access-form-heading > div { min-width: 0; }.form-emblem { width: 42px; height: 42px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid rgba(216,173,92,.35); border-radius: 13px; color: var(--access-brass); background: rgba(216,173,92,.08); box-shadow: inset 0 0 18px rgba(216,173,92,.06); font-size: 18px; }.success-emblem { color: #b8c791; border-color: rgba(184,199,145,.35); background: rgba(184,199,145,.08); }
 .premium-access .access-form > div h2, .premium-access .access-form-heading h2 { margin: 4px 0; color: var(--access-ink); font-size: 27px; }.premium-access .access-form > div p, .premium-access .access-form-heading p { color: var(--access-muted); }.premium-access .section-kicker { color: var(--access-brass); }
-.premium-access .access-form label { color: #d8cabd; font-size: 9px; letter-spacing: .055em; text-transform: uppercase; }.premium-access .access-form input { min-height: 48px; border-color: rgba(224,203,179,.2); color: var(--access-ink); background: rgba(10,8,7,.34); caret-color: var(--access-brass); transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }.premium-access .access-form input:hover { border-color: rgba(224,203,179,.34); background: rgba(10,8,7,.46); }.premium-access .access-form input:focus { border-color: var(--access-brass); outline: 0; box-shadow: 0 0 0 3px rgba(216,173,92,.11), 0 10px 28px rgba(0,0,0,.18); transform: translateY(-1px); }.premium-access .access-form > small { color: #9f9185; }
+.premium-access .access-form label {
+  color: #d8cabd;
+  caret-color: transparent;
+  user-select: none;
+  font-size: 9px;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.premium-access .access-form input {
+  min-height: 48px;
+  border-color: rgba(224,203,179,.2);
+  color: var(--access-ink);
+  background: rgba(10,8,7,.34);
+  caret-color: var(--access-brass);
+  user-select: text;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.premium-access .access-form input:hover { border-color: rgba(224,203,179,.34); background: rgba(10,8,7,.46); }.premium-access .access-form input:focus { border-color: var(--access-brass); outline: 0; box-shadow: 0 0 0 3px rgba(216,173,92,.11), 0 10px 28px rgba(0,0,0,.18); transform: translateY(-1px); }.premium-access .access-form > small { color: #9f9185; }
 .secret-input { display: flex; align-items: stretch; overflow: hidden; border-radius: 9px; }.secret-input input { min-width: 0; flex: 1; border-radius: 9px 0 0 9px !important; }.secret-input button { min-width: 58px; border: 1px solid rgba(224,203,179,.2); border-left: 0; border-radius: 0 9px 9px 0; color: var(--access-brass); background: rgba(10,8,7,.48); cursor: pointer; font-size: 9px; font-weight: 800; }.secret-input button:hover { background: rgba(216,173,92,.1); }.secret-input button:focus-visible { outline: 2px solid var(--access-brass); outline-offset: -3px; }
 .key-assurance { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }.key-assurance span { padding: 8px; border: 1px solid rgba(216,173,92,.13); border-radius: 9px; color: #a99b8e; background: rgba(216,173,92,.035); text-align: center; font-size: 7px; line-height: 1.3; }
 .access-submit { min-height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 18px; border: 1px solid rgba(226,188,114,.62); border-radius: 12px; color: #211914; background: linear-gradient(120deg, #c99643, #e2bd75 55%, #c99749); box-shadow: 0 14px 30px rgba(156,105,38,.18), inset 0 1px rgba(255,255,255,.38); cursor: pointer; font: inherit; font-size: 11px; font-weight: 850; transition: transform .18s ease, box-shadow .18s ease, filter .18s ease; }.access-submit b { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; color: #f6e8cd; background: rgba(45,28,17,.82); font-size: 16px; transition: transform .18s ease; }.access-submit:hover:not(:disabled) { transform: translateY(-2px); filter: saturate(1.08); box-shadow: 0 18px 38px rgba(156,105,38,.27); }.access-submit:hover b { transform: translateX(2px); }.access-submit:disabled { opacity: .62; cursor: wait; }
@@ -473,7 +492,7 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 
   .access-console-body {
-    --console-open-duration: 1.8s;
+    --console-open-duration: 1.5s;
     --console-open-delay: .18s;
     transition-property: grid-template-rows,opacity,visibility !important;
     transition-duration: var(--console-open-duration),.82s,0s !important;
