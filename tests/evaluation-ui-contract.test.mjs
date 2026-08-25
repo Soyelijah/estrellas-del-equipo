@@ -114,7 +114,14 @@ test("presents login and administrator recovery in an accessible expanding conso
   assert.match(page, /setAccessExpanded\(true\)/);
   assert.match(page, /!compactDesktopLogin/);
   assert.match(page, /useSyncExternalStore/);
+  assert.match(page, /className="access-recovery-trigger"/);
+  assert.ok(
+    page.indexOf('className="access-recovery-trigger"') <
+      page.indexOf('className="access-console-body"'),
+  );
   assert.match(styles, /\.access-console:hover \.access-console-body/);
+  assert.match(styles, /grid-template-rows \.84s/);
+  assert.match(styles, /\.access-console-trigger:hover \.console-lock::before/);
   assert.match(styles, /@media \(max-width: 900px\)/);
   assert.match(styles, /\.access-console \{ width: 100%; max-width: 560px;/);
   assert.match(styles, /prefers-reduced-motion: reduce/);

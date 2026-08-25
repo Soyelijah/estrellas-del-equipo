@@ -1273,6 +1273,24 @@ function AccessGate({
             </span>
             <span className="console-lock" aria-hidden="true"><i /></span>
           </button>
+          {mode === "login" && !bootstrapAllowed && (
+            <button
+              className="access-recovery-trigger"
+              type="button"
+              onClick={() => {
+                setMode("recovery-key");
+                setShowSecret(false);
+                setAccessExpanded(true);
+              }}
+            >
+              <span className="recovery-key" aria-hidden="true"><i /></span>
+              <span>
+                <small>SOLO ADMINISTRADOR</small>
+                <strong>Recuperar administración</strong>
+              </span>
+              <b aria-hidden="true">→</b>
+            </button>
+          )}
           <div className="access-console-body">
             <div className="access-console-content" id="access-console-content">
         {mode === "setup-key" && (
@@ -1389,16 +1407,6 @@ function AccessGate({
               label="Entrar al sistema"
               busyLabel="Ingresando…"
             />
-            <button
-              className="text-action"
-              type="button"
-              onClick={() => {
-                setMode("recovery-key");
-                setShowSecret(false);
-              }}
-            >
-              Recuperar acceso administrador
-            </button>
             {message && (
               <p className="form-message" role="status">
                 {message}
