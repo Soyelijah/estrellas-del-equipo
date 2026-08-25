@@ -440,3 +440,15 @@ test("requires session, unique key, current password and exact phrase for a tota
   assert.equal(resets, 1);
   assert.match(response.headers.get("set-cookie"), /^estrellas_session=; Path=\/; HttpOnly; SameSite=Strict; Max-Age=0; Secure$/);
 });
+
+test("distinguishes a rejected reset key from a rejected current password for the signed-in administrator", async () => {
+  const actor = { userId: "11111111-1111-4111-8111-111111111111", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" };
+  const repository = {
+    async findSessionActor() { return actor; },
+    async findAdministratorCredential() { return { passwordHash: "password-hash" }; },
+  };
+  const request = mutation("/api/admin/system/reset", { accessKey: "clave-equivocada", password: "contraseña-equivocada", confirmation: "ELIMINAR TODO Y REINICIAR" }, { cookie: "estrellas_session=private-cookie-token" });
+  const response = await handleAdminAuthRequest(request, dependencies({ repository, verifySetupAccessKey: async () => false }));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { ok: false, error: "invalid_reset_access_key" });
+});

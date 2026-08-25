@@ -94,6 +94,17 @@ test("provides complete profiles, guarded reset, and kiosk-style interaction con
   assert.match(page, /addEventListener\("contextmenu", preventContextMenu\)/);
   assert.match(styles, /body \{[^}]*user-select: none/);
   assert.match(styles, /input, textarea, \[contenteditable="true"\][^{]*\{[^}]*user-select: text/);
+  assert.match(page, /name="password" type="password" required minLength=\{12\}/);
+  assert.match(page, /name="accessKey" type="password" required minLength=\{12\}/);
+  assert.match(page, /Clave única de configuración inicial/);
+});
+
+test("styles every credential reset form as a complete responsive control", () => {
+  assert.match(page, /className="credential-secret"/);
+  assert.match(page, /Reemplazar acceso/);
+  assert.match(styles, /\.credential-grid \{[^}]*repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles, /\.credential-card input \{[^}]*width: 100%/);
+  assert.match(styles, /\.credential-card input:focus-visible/);
 });
 
 test("gives the administrator audited controls over evaluation history", () => {

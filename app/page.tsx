@@ -410,7 +410,9 @@ export default function Home() {
       invalid_profile: "Revisa el correo, teléfono, biografía y fecha de ingreso.",
       invalid_avatar: "La foto no es válida o supera el tamaño permitido.",
       invalid_reset_confirmation: "Escribe exactamente la frase de reinicio solicitada.",
-      invalid_reset_authorization: "La contraseña o la clave única no son correctas.",
+      invalid_reset_access_key: "La clave única de configuración inicial no es correcta.",
+      invalid_reset_password: "La contraseña actual del administrador no es correcta.",
+      invalid_reset_authorization: "No fue posible autorizar el reinicio con esas credenciales.",
       bootstrap_closed: "La cuenta administradora ya está configurada.",
       invalid_access_key: "La clave única no es válida.",
       setup_access_required: "Valida primero la clave única.",
@@ -1999,9 +2001,21 @@ function TeamAdmin({
           <p>Elimina permanentemente la cuenta administradora, trabajadores, turnos, evaluaciones, propinas, sesiones y auditoría. Después aparecerá nuevamente la creación del primer administrador.</p>
         </div>
         <div className="reset-fields">
-          <label>Contraseña actual<input name="password" type="password" required maxLength={128} autoComplete="current-password" /></label>
-          <label>Clave única<input name="accessKey" type="password" required autoComplete="off" /></label>
-          <label>Confirmación exacta<input name="confirmation" required autoComplete="off" placeholder="ELIMINAR TODO Y REINICIAR" /></label>
+          <label>
+            Contraseña actual
+            <input name="password" type="password" required minLength={12} maxLength={128} autoComplete="current-password" />
+            <small>La contraseña con la que ingresaste como administrador.</small>
+          </label>
+          <label>
+            Clave única de configuración inicial
+            <input name="accessKey" type="password" required minLength={12} maxLength={128} autoComplete="off" />
+            <small>La clave privada usada para crear o recuperar la administración.</small>
+          </label>
+          <label>
+            Confirmación exacta
+            <input name="confirmation" required autoComplete="off" placeholder="ELIMINAR TODO Y REINICIAR" />
+            <small>Escribe la frase completa tal como aparece.</small>
+          </label>
         </div>
         <button className="danger-action" disabled={submitting}>Eliminar todo y volver a cero</button>
       </form>
@@ -2093,9 +2107,7 @@ function CredentialsAdmin({
               }
             >
               <div className="worker-identity">
-                <span className="avatar small">
-                  {initials(user.displayName)}
-                </span>
+                <ProfileAvatar member={user} />
                 <div>
                   <strong>{user.displayName}</strong>
                   <small>@{user.loginIdentifier}</small>
@@ -2103,17 +2115,21 @@ function CredentialsAdmin({
               </div>
               <label>
                 Nueva contraseña
-                <input
-                  name="newPassword"
-                  type="password"
-                  required
-                  minLength={12}
-                  maxLength={128}
-                  autoComplete="new-password"
-                />
+                <div className="credential-secret">
+                  <input
+                    name="newPassword"
+                    type="password"
+                    required
+                    minLength={12}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    placeholder="Mínimo 12 caracteres"
+                  />
+                </div>
+                <small className="credential-note">Al reemplazarla se cerrarán sus sesiones activas.</small>
               </label>
               <button className="primary full" disabled={submitting}>
-                Restablecer contraseña
+                Reemplazar acceso
               </button>
             </form>
           ))}

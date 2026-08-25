@@ -214,7 +214,7 @@ test("resets the complete system only with the exact phrase and current administ
   const actor = { userId: "11111111-1111-4111-8111-111111111111", role: "admin", organizationId: "org-1", membershipId: "m-admin" };
   const rejected = await resetSystem({ password: "wrong", confirmation: "ELIMINAR TODO Y REINICIAR" }, actor, deps);
   const accepted = await resetSystem({ password: "valid-password", confirmation: "ELIMINAR TODO Y REINICIAR" }, actor, deps);
-  assert.deepEqual(rejected, { ok: false, status: 401, error: "invalid_reset_authorization" });
+  assert.deepEqual(rejected, { ok: false, status: 401, error: "invalid_reset_password" });
   assert.deepEqual(accepted, { ok: true, status: 200 });
   assert.equal(deps.saved.resets.length, 1);
 });

@@ -306,7 +306,7 @@ export async function resetSystem(
   }
   const credential = await dependencies.repository.findAdministratorCredential(actor.userId, actor.organizationId);
   if (!credential || !await dependencies.verifyPassword(input.password, credential.passwordHash)) {
-    return { ok: false as const, status: 401, error: "invalid_reset_authorization" };
+    return { ok: false as const, status: 401, error: "invalid_reset_password" };
   }
   const result = await dependencies.repository.resetSystem({ organizationId: actor.organizationId, actorMembershipId: actor.membershipId, now: dependencies.now });
   if (!result.reset) return { ok: false as const, status: 409, error: "reset_failed" };

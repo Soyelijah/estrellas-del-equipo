@@ -315,7 +315,7 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       const actor = await actorFor(request, dependencies);
       if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
       if (!dependencies.setupAccessConfigured || !await dependencies.verifySetupAccessKey(parsed.body.accessKey)) {
-        return json({ ok: false, error: "invalid_reset_authorization" }, 401);
+        return json({ ok: false, error: "invalid_reset_access_key" }, 401);
       }
       const result = await resetSystem(parsed.body as never, actor, serviceDependencies);
       return result.ok
