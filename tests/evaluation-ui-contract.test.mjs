@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
 test("uses an accessible five-star control instead of a score select", () => {
   assert.equal(page.includes("<select name={criterion.id}"), false);
@@ -102,6 +103,21 @@ test("keeps a slow login from remaining indefinitely in a generic saving state",
   assert.match(page, /fetchAuthState/);
   assert.match(page, /El servidor está tardando más de lo habitual/);
   assert.match(page, /El acceso tardó demasiado/);
+});
+
+test("presents login and administrator recovery in an accessible expanding console", () => {
+  assert.match(page, /className={`access-console/);
+  assert.match(page, /className="access-console-trigger"/);
+  assert.match(page, /aria-expanded={consoleOpen}/);
+  assert.match(page, /aria-controls="access-console-content"/);
+  assert.match(page, /id="access-console-content"/);
+  assert.match(page, /setAccessExpanded\(true\)/);
+  assert.match(page, /!compactDesktopLogin/);
+  assert.match(page, /useSyncExternalStore/);
+  assert.match(styles, /\.access-console:hover \.access-console-body/);
+  assert.match(styles, /@media \(max-width: 900px\)/);
+  assert.match(styles, /\.access-console \{ width: 100%; max-width: 560px;/);
+  assert.match(styles, /prefers-reduced-motion: reduce/);
 });
 
 test("separates the long administrator evaluation page into focused categories", () => {

@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useReducer, useState } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   allocateTipPoolByExperienceFactors,
   formatExperienceFactor,
@@ -22,6 +29,17 @@ const LOGIN_SLOW_NOTICE_MS = 4_000;
 const LOGIN_TIMEOUT_MS = 45_000;
 const AUTH_STATUS_TIMEOUT_MS = 5_000;
 const READ_RETRY_DELAYS_MS = [250, 750] as const;
+const FINE_POINTER_QUERY = "(hover: hover) and (pointer: fine)";
+
+function subscribeFinePointer(callback: () => void) {
+  const media = window.matchMedia(FINE_POINTER_QUERY);
+  media.addEventListener("change", callback);
+  return () => media.removeEventListener("change", callback);
+}
+
+function hasFinePointer() {
+  return window.matchMedia(FINE_POINTER_QUERY).matches;
+}
 
 async function readJsonWithRetry<T>(path: string): Promise<T> {
   return retryRead(async () => {
@@ -1181,6 +1199,20 @@ function AccessGate({
   bootstrapAllowed: boolean;
 }) {
   const recovery = mode === "recovery-key" || mode === "recovery-password";
+  const compactDesktopLogin = useSyncExternalStore(
+    subscribeFinePointer,
+    hasFinePointer,
+    () => false,
+  );
+  const [accessExpanded, setAccessExpanded] = useState(false);
+  const consoleOpen =
+    bootstrapAllowed || recovery || !compactDesktopLogin || accessExpanded;
+  const canCollapse = compactDesktopLogin && !bootstrapAllowed && !recovery;
+  const consoleTitle = bootstrapAllowed
+    ? "Configurar administración"
+    : recovery
+      ? "Recuperar administración"
+      : "Iniciar sesión";
   return (
     <main className="access-shell premium-access">
       <div className="access-aurora" aria-hidden="true" />
@@ -1222,6 +1254,27 @@ function AccessGate({
             <span>Auditoría activa</span>
           </div>
         </div>
+        <div
+          className={`access-console ${consoleOpen ? "is-expanded" : ""} ${recovery ? "is-recovery" : ""}`}
+          onFocus={() => setAccessExpanded(true)}
+        >
+          <button
+            className="access-console-trigger"
+            type="button"
+            aria-expanded={consoleOpen}
+            aria-controls="access-console-content"
+            disabled={!canCollapse}
+            onClick={() => setAccessExpanded((current) => !current)}
+          >
+            <span className="console-sigil" aria-hidden="true">✦</span>
+            <span className="console-trigger-copy">
+              <small>ACCESO PROTEGIDO</small>
+              <strong>{consoleTitle}</strong>
+            </span>
+            <span className="console-lock" aria-hidden="true"><i /></span>
+          </button>
+          <div className="access-console-body">
+            <div className="access-console-content" id="access-console-content">
         {mode === "setup-key" && (
           <form
             className="access-form"
@@ -1322,7 +1375,6 @@ function AccessGate({
                 name="loginIdentifier"
                 required
                 autoComplete="username"
-                autoFocus
               />
             </label>
             <SecretField
@@ -1430,6 +1482,9 @@ function AccessGate({
             )}
           </form>
         )}
+            </div>
+          </div>
+        </div>
       </section>
       <footer className="access-footer">
         <span>Uso interno del equipo</span>
