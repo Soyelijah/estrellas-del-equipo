@@ -7,11 +7,13 @@ import {
 } from "../domain/tips";
 import {
   AppView,
+  evaluationAdminSections,
   evaluationCompletionState,
   evaluationWorkspaceState,
   navigationForRole,
   onboardingForTeam,
   shiftRemovalReducer,
+  type EvaluationAdminSection,
   type ShiftRemovalState,
 } from "./view-model";
 import { retryRead } from "./resilient-read";
@@ -1934,9 +1936,8 @@ function AdminOperations({
     periodId: string,
   ): Promise<void>;
 }) {
-  const [operationSection, setOperationSection] = useState<
-    "cycle" | "shifts" | "history"
-  >("cycle");
+  const [operationSection, setOperationSection] =
+    useState<EvaluationAdminSection>("cycle");
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -1983,36 +1984,22 @@ function AdminOperations({
         </div>
       </div>
       <nav className="operation-sections" aria-label="Categorías de evaluaciones">
-        <button
-          type="button"
-          className={operationSection === "cycle" ? "active" : ""}
-          aria-pressed={operationSection === "cycle"}
-          onClick={() => setOperationSection("cycle")}
-        >
-          <span>01</span>
-          <strong>Ciclo y resultados</strong>
-          <small>Mes vigente, criterios y cierre</small>
-        </button>
-        <button
-          type="button"
-          className={operationSection === "shifts" ? "active" : ""}
-          aria-pressed={operationSection === "shifts"}
-          onClick={() => setOperationSection("shifts")}
-        >
-          <span>02</span>
-          <strong>Turnos diarios</strong>
-          <small>{operations?.shifts.length ?? 0} turnos registrados</small>
-        </button>
-        <button
-          type="button"
-          className={operationSection === "history" ? "active" : ""}
-          aria-pressed={operationSection === "history"}
-          onClick={() => setOperationSection("history")}
-        >
-          <span>03</span>
-          <strong>Historial</strong>
-          <small>{operations?.submissions.length ?? 0} evaluaciones</small>
-        </button>
+        {evaluationAdminSections({
+          shiftCount: operations?.shifts.length ?? 0,
+          submissionCount: operations?.submissions.length ?? 0,
+        }).map((section) => (
+          <button
+            type="button"
+            key={section.id}
+            className={operationSection === section.id ? "active" : ""}
+            aria-pressed={operationSection === section.id}
+            onClick={() => setOperationSection(section.id)}
+          >
+            <span>{section.index}</span>
+            <strong>{section.label}</strong>
+            <small>{section.detail}</small>
+          </button>
+        ))}
       </nav>
       <div className="operations-grid">
         {operationSection === "cycle" && (operations?.period?.status === "open" ? (
@@ -2218,7 +2205,7 @@ function AdminOperations({
       {operationSection === "cycle" && (
         <MonthlyEvaluationSummary summary={operations?.summary ?? null} />
       )}
-      {operationSection === "cycle" && operations?.period?.status === "open" && (
+      {operationSection === "close" && operations?.period?.status === "open" && (
         <form
           className="cycle-close-panel"
           onSubmit={(event) =>
@@ -2248,7 +2235,7 @@ function AdminOperations({
           </button>
         </form>
       )}
-      {operationSection === "cycle" && operations?.period?.status === "open" && (
+      {operationSection === "control" && operations?.period?.status === "open" && (
         <form
           className="cycle-close-panel cycle-delete-panel"
           onSubmit={(event) =>
@@ -2288,6 +2275,18 @@ function AdminOperations({
             Eliminar ciclo antiguo
           </button>
         </form>
+      )}
+      {operationSection === "close" && operations?.period?.status !== "open" && (
+        <Empty
+          title="No hay un ciclo abierto para cerrar"
+          text="Abre un ciclo mensual antes de usar el cierre del mes."
+        />
+      )}
+      {operationSection === "control" && operations?.period?.status !== "open" && (
+        <Empty
+          title="No hay un ciclo abierto para administrar"
+          text="La zona de control se habilita cuando existe un ciclo mensual abierto."
+        />
       )}
       {operationSection === "history" && (
       <section className="history-control">

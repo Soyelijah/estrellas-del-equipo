@@ -7,6 +7,59 @@ export type AppView =
   | "evaluaciones"
   | "acuerdo";
 
+export type EvaluationAdminSection =
+  | "cycle"
+  | "shifts"
+  | "history"
+  | "close"
+  | "control";
+
+export function evaluationAdminSections(input: {
+  shiftCount: number;
+  submissionCount: number;
+}) {
+  const shiftLabel = input.shiftCount === 1 ? "turno registrado" : "turnos registrados";
+  const submissionLabel = input.submissionCount === 1 ? "evaluación" : "evaluaciones";
+
+  return [
+    {
+      id: "cycle",
+      index: "01",
+      label: "Ciclo y resultados",
+      detail: "Mes vigente, criterios y resultados",
+    },
+    {
+      id: "shifts",
+      index: "02",
+      label: "Turnos diarios",
+      detail: `${input.shiftCount} ${shiftLabel}`,
+    },
+    {
+      id: "history",
+      index: "03",
+      label: "Historial",
+      detail: `${input.submissionCount} ${submissionLabel}`,
+    },
+    {
+      id: "close",
+      index: "04",
+      label: "Cierre del mes",
+      detail: "Finalizar y bloquear evaluaciones",
+    },
+    {
+      id: "control",
+      index: "05",
+      label: "Zona de control",
+      detail: "Acciones irreversibles del ciclo",
+    },
+  ] satisfies Array<{
+    id: EvaluationAdminSection;
+    index: string;
+    label: string;
+    detail: string;
+  }>;
+}
+
 export type ShiftRemovalTarget = {
   id: string;
   startsAt: string;

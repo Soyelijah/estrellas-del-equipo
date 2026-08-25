@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   evaluationCompletionState,
+  evaluationAdminSections,
   evaluationWorkspaceState,
   navigationForRole,
   onboardingForTeam,
@@ -122,4 +123,19 @@ test("closes the shift confirmation only after a successful removal and announce
       success: "Turno eliminado correctamente.",
     },
   );
+});
+
+test("keeps monthly closure and destructive control out of cycle results", () => {
+  const sections = evaluationAdminSections({
+    shiftCount: 2,
+    submissionCount: 15,
+  });
+
+  assert.deepEqual(
+    sections.map((section) => section.id),
+    ["cycle", "shifts", "history", "close", "control"],
+  );
+  assert.equal(sections.find((section) => section.id === "cycle")?.detail, "Mes vigente, criterios y resultados");
+  assert.equal(sections.find((section) => section.id === "close")?.label, "Cierre del mes");
+  assert.equal(sections.find((section) => section.id === "control")?.label, "Zona de control");
 });
