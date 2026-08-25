@@ -82,6 +82,20 @@ test("registers one general shift without asking for an area", () => {
   assert.match(page, /Cerrar confirmación/);
 });
 
+test("provides complete profiles, guarded reset, and kiosk-style interaction controls", () => {
+  assert.match(page, /Perfil profesional/);
+  assert.match(page, /name="email"/);
+  assert.match(page, /name="phone"/);
+  assert.match(page, /name="hiredOn"/);
+  assert.match(page, /name="bio"/);
+  assert.match(page, /accept="image\/jpeg,image\/png,image\/webp"/);
+  assert.match(page, /ELIMINAR TODO Y REINICIAR/);
+  assert.match(page, /\/api\/admin\/system\/reset/);
+  assert.match(page, /addEventListener\("contextmenu", preventContextMenu\)/);
+  assert.match(styles, /body \{[^}]*user-select: none/);
+  assert.match(styles, /input, textarea, \[contenteditable="true"\][^{]*\{[^}]*user-select: text/);
+});
+
 test("gives the administrator audited controls over evaluation history", () => {
   assert.match(page, /Historial de evaluaciones/);
   assert.match(page, /ANULAR HISTORIAL/);

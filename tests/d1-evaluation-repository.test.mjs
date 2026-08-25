@@ -136,7 +136,7 @@ test("persists a one-time administrator, its hashed session, and managed users a
     user: { id: "worker-1", authSubject: "local:worker-1", displayName: "Garzón 1", loginIdentifier: "garzon.1", passwordHash: "worker-password-hash", jobTitle: "waiter", status: "active", createdAt: "2026-08-22T13:00:00.000Z" },
     membership: { id: "membership-worker", organizationId: "org-1", userId: "worker-1", role: "worker", joinedAt: "2026-08-22T13:00:00.000Z", createdByMembershipId: "membership-admin", tipFactorHundredths: 65 },
   }), { created: true });
-  assert.deepEqual((await repository.listOrganizationUsers("org-1")).map((user) => ({ ...user })), [{ id: "worker-1", displayName: "Garzón 1", loginIdentifier: "garzon.1", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }]);
+  assert.deepEqual((await repository.listOrganizationUsers("org-1")).map((user) => ({ ...user })), [{ id: "worker-1", displayName: "Garzón 1", loginIdentifier: "garzon.1", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65, email: null, phone: null, bio: null, hiredOn: null, hasAvatar: false }]);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE action = 'user.created'").get().count, 1);
 });
 
@@ -157,8 +157,44 @@ test("loads the session actor and organization users in one database snapshot", 
   const snapshot = await repository.findSessionSnapshot("session-hash", "2026-08-22T14:00:00.000Z");
   assert.deepEqual(snapshot, {
     actor: { userId: "worker-1", displayName: "Roberto", role: "worker", organizationId: "org-1", membershipId: "membership-worker" },
-    users: [{ id: "worker-1", displayName: "Roberto", loginIdentifier: "roberto", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65 }],
+    users: [{ id: "worker-1", displayName: "Roberto", loginIdentifier: "roberto", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65, email: null, phone: null, bio: null, hiredOn: null, hasAvatar: false }],
   });
+});
+
+test("persists private profile fields and a profile photo without exposing image bytes in the user list", async () => {
+  const { database, repository } = createEmptyAdminFixture();
+  await repository.saveBootstrap({
+    organization: { id: "org-1", name: "Restaurante", createdAt: "2026-08-22T12:00:00.000Z" },
+    user: { id: "admin-1", authSubject: "local:admin-1", displayName: "Jefe", loginIdentifier: "jefe", passwordHash: "admin-hash", status: "active", createdAt: "2026-08-22T12:00:00.000Z" },
+    membership: { id: "membership-admin", organizationId: "org-1", userId: "admin-1", role: "admin", joinedAt: "2026-08-22T12:00:00.000Z" },
+    guard: { key: "administrator_bootstrap", createdAt: "2026-08-22T12:00:00.000Z" },
+  });
+  await repository.createManagedUser({
+    user: { id: "worker-1", authSubject: "local:worker-1", displayName: "Roberto", loginIdentifier: "roberto", passwordHash: "worker-hash", jobTitle: "waiter", status: "active", createdAt: "2026-08-22T13:00:00.000Z" },
+    membership: { id: "membership-worker", organizationId: "org-1", userId: "worker-1", role: "worker", joinedAt: "2026-08-22T13:00:00.000Z", createdByMembershipId: "membership-admin", tipFactorHundredths: 65 },
+  });
+  assert.deepEqual(await repository.updateUserProfile({ userId: "worker-1", organizationId: "org-1", actorMembershipId: "membership-admin", email: "roberto@example.com", phone: "+56912345678", bio: "Garzón de salón", hiredOn: "2026-08-25", auditId: "audit-profile", now: "2026-08-25T12:00:00.000Z" }), { updated: true });
+  assert.deepEqual(await repository.updateUserAvatar({ userId: "worker-1", organizationId: "org-1", actorMembershipId: "membership-admin", mimeType: "image/webp", base64: "UklGRgAAAABXRUJQ", auditId: "audit-avatar", now: "2026-08-25T12:01:00.000Z" }), { updated: true });
+  const users = await repository.listOrganizationUsers("org-1");
+  assert.equal(users[0].email, "roberto@example.com");
+  assert.equal(users[0].hasAvatar, true);
+  assert.equal(JSON.stringify(users).includes("UklGRgAAAABXRUJQ"), false);
+  assert.deepEqual({ ...await repository.findUserAvatar("worker-1", "org-1") }, { mimeType: "image/webp", base64: "UklGRgAAAABXRUJQ", updatedAt: "2026-08-25T12:01:00.000Z" });
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE action IN ('account.profile_updated', 'account.avatar_updated')").get().count, 2);
+});
+
+test("resets the single-tenant database and reopens administrator bootstrap", async () => {
+  const { database, repository } = createEmptyAdminFixture();
+  await repository.saveBootstrap({
+    organization: { id: "org-1", name: "Restaurante", createdAt: "2026-08-22T12:00:00.000Z" },
+    user: { id: "admin-1", authSubject: "local:admin-1", displayName: "Jefe", loginIdentifier: "jefe", passwordHash: "admin-hash", status: "active", createdAt: "2026-08-22T12:00:00.000Z" },
+    membership: { id: "membership-admin", organizationId: "org-1", userId: "admin-1", role: "admin", joinedAt: "2026-08-22T12:00:00.000Z" },
+    guard: { key: "administrator_bootstrap", createdAt: "2026-08-22T12:00:00.000Z" },
+  });
+  assert.deepEqual(await repository.resetSystem({ organizationId: "org-1" }), { reset: true });
+  assert.deepEqual(await repository.getBootstrapState(), { allowed: true, organizationId: null });
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM users").get().count, 0);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM audit_events").get().count, 0);
 });
 
 test("recovers the administrator password atomically, revokes sessions, and records no secret", async () => {

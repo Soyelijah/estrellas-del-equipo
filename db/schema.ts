@@ -75,6 +75,26 @@ export const memberships = sqliteTable("memberships", {
   index("idx_memberships_user").on(table.userId),
 ]);
 
+export const userProfiles = sqliteTable("user_profiles", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  email: text("email"),
+  phone: text("phone"),
+  bio: text("bio"),
+  hiredOn: text("hired_on"),
+  avatarMimeType: text("avatar_mime_type"),
+  avatarBase64: text("avatar_base64"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedByMembershipId: text("updated_by_membership_id").references(() => memberships.id, { onDelete: "set null" }),
+}, (table) => [
+  check("user_profiles_email_length_check", sql`${table.email} IS NULL OR length(${table.email}) <= 254`),
+  check("user_profiles_phone_length_check", sql`${table.phone} IS NULL OR length(${table.phone}) <= 32`),
+  check("user_profiles_bio_length_check", sql`${table.bio} IS NULL OR length(${table.bio}) <= 500`),
+  check("user_profiles_avatar_mime_check", sql`${table.avatarMimeType} IS NULL OR ${table.avatarMimeType} IN ('image/jpeg', 'image/png', 'image/webp')`),
+  check("user_profiles_avatar_pair_check", sql`(${table.avatarMimeType} IS NULL) = (${table.avatarBase64} IS NULL)`),
+  check("user_profiles_avatar_size_check", sql`${table.avatarBase64} IS NULL OR length(${table.avatarBase64}) <= 218456`),
+  index("idx_user_profiles_updated_by").on(table.updatedByMembershipId),
+]);
+
 export const tipAgreements = sqliteTable("tip_agreements", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),

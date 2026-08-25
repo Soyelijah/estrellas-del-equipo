@@ -52,8 +52,47 @@ test("foundation migration creates the integrity-critical tables", () => {
     "shifts",
     "tip_agreement_participants",
     "tip_agreements",
+    "user_profiles",
     "users",
   ]);
+});
+
+test("user profiles store optional private contact data and a bounded avatar", () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON");
+  for (const paths of foundationMigrationPaths()) database.exec(readFileSync(paths.up, "utf8"));
+
+  database.exec("INSERT INTO users (id, login_identifier, display_name, status) VALUES ('u1', 'garzon', 'Garzón', 'active')");
+  const insert = database.prepare(`
+    INSERT INTO user_profiles (user_id, email, phone, bio, hired_on, avatar_mime_type, avatar_base64)
+    VALUES ('u1', ?, ?, ?, '2026-08-25', 'image/webp', ?)
+  `);
+  insert.run("garzon@example.com", "+56912345678", "Servicio de salón", "YQ==");
+  assert.throws(
+    () => database.exec("UPDATE user_profiles SET avatar_mime_type = 'image/svg+xml' WHERE user_id = 'u1'"),
+    /CHECK constraint failed: user_profiles_avatar_mime_check/,
+  );
+  database.exec("DELETE FROM users WHERE id = 'u1'");
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM user_profiles").get().count, 0);
+});
+
+test("a total reset can remove the tenant before deleting users and reopening bootstrap", () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON");
+  for (const paths of foundationMigrationPaths()) database.exec(readFileSync(paths.up, "utf8"));
+  database.exec(`
+    INSERT INTO organizations (id, name) VALUES ('o1', 'Restaurante');
+    INSERT INTO users (id, login_identifier, display_name, status) VALUES ('u1', 'admin', 'Administrador', 'active');
+    INSERT INTO memberships (id, organization_id, user_id, role, job_title, starts_at) VALUES ('m1', 'o1', 'u1', 'admin', 'head_waiter', '2026-08-25');
+    INSERT INTO user_profiles (user_id, email, updated_by_membership_id) VALUES ('u1', 'admin@example.com', 'm1');
+    INSERT INTO bootstrap_guards (key) VALUES ('administrator_bootstrap');
+    DELETE FROM organizations;
+    DELETE FROM users;
+    DELETE FROM bootstrap_guards;
+  `);
+  for (const table of ["organizations", "memberships", "users", "user_profiles", "bootstrap_guards"]) {
+    assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0, `${table} must be empty`);
+  }
 });
 
 test("authentication migration stores only unique session hashes and a one-time bootstrap guard", () => {

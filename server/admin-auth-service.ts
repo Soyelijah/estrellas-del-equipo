@@ -10,7 +10,7 @@ type AccountInput = {
 type BootstrapInput = AccountInput & { organizationName: string };
 type ManagedUserInput = AccountInput & { jobTitle: JobTitle; tipPercentage: string | number };
 
-export type SessionActor = { role: Role; organizationId: string; membershipId: string };
+export type SessionActor = { userId?: string; role: Role; organizationId: string; membershipId: string };
 
 type Dependencies = {
   repository: {
@@ -23,6 +23,10 @@ type Dependencies = {
     updateManagedUser(record: Record<string, unknown>): Promise<{ updated: boolean; conflict: boolean }>;
     setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
     resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
+    updateUserProfile(record: Record<string, unknown>): Promise<{ updated: boolean }>;
+    updateUserAvatar(record: Record<string, unknown>): Promise<{ updated: boolean }>;
+    findAdministratorCredential(userId: string, organizationId: string): Promise<{ passwordHash: string } | null>;
+    resetSystem(record: Record<string, string>): Promise<{ reset: boolean }>;
   };
   createId(): string;
   createToken(): string;
@@ -35,6 +39,10 @@ type Dependencies = {
 const LOGIN_PATTERN = /^[\p{L}\p{N}._@+-]{3,80}$/u;
 const JOB_TITLES = new Set<JobTitle>(["head_waiter", "waiter", "bartender", "cashier"]);
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const PHONE_PATTERN = /^[\d+().\s-]{6,32}$/u;
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const AVATAR_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function normalized(value: unknown): string {
   return typeof value === "string" ? value.normalize("NFKC").trim() : "";
@@ -42,6 +50,26 @@ function normalized(value: unknown): string {
 
 function normalizeLogin(value: unknown): string {
   return normalized(value).toLocaleLowerCase("es-CL");
+}
+
+function validIsoDate(value: string): boolean {
+  if (!ISO_DATE_PATTERN.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validAvatarBytes(mimeType: string, base64: string): boolean {
+  try {
+    const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+    if (mimeType === "image/jpeg") return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    if (mimeType === "image/png") return bytes.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((value, index) => bytes[index] === value);
+    if (mimeType === "image/webp") return bytes.length >= 12
+      && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF"
+      && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function validAccount(input: AccountInput): boolean {
@@ -201,5 +229,86 @@ export async function resetManagedUserPassword(input: { userId: string; newPassw
   if (!USER_ID_PATTERN.test(input.userId) || typeof input.newPassword !== "string" || input.newPassword.length < 12 || input.newPassword.length > 128) return { ok: false as const, status: 422, error: "invalid_account_data" };
   const result = await dependencies.repository.resetManagedUserPassword({ userId: input.userId, organizationId: actor.organizationId, actorMembershipId: actor.membershipId, passwordHash: await dependencies.hashPassword(input.newPassword), auditId: dependencies.createId(), now: dependencies.now });
   if (!result.updated) return { ok: false as const, status: 404, error: "managed_user_not_found" };
+  return { ok: true as const, status: 200 };
+}
+
+function canManageProfile(userId: string, actor: SessionActor): boolean {
+  return actor.role === "admin" || actor.userId === userId;
+}
+
+export async function updateUserProfile(
+  input: { userId: string; email?: unknown; phone?: unknown; bio?: unknown; hiredOn?: unknown },
+  actor: SessionActor,
+  dependencies: Dependencies,
+) {
+  if (!USER_ID_PATTERN.test(input.userId)) return { ok: false as const, status: 422, error: "invalid_profile" };
+  if (!canManageProfile(input.userId, actor)) return { ok: false as const, status: 403, error: "profile_forbidden" };
+  const email = normalizeLogin(input.email);
+  const phone = normalized(input.phone);
+  const bio = normalized(input.bio);
+  const hiredOn = normalized(input.hiredOn);
+  if ((email && (email.length > 254 || !EMAIL_PATTERN.test(email)))
+    || (phone && !PHONE_PATTERN.test(phone))
+    || bio.length > 500
+    || (hiredOn && !validIsoDate(hiredOn))) {
+    return { ok: false as const, status: 422, error: "invalid_profile" };
+  }
+  const result = await dependencies.repository.updateUserProfile({
+    userId: input.userId,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    email: email || null,
+    phone: phone || null,
+    bio: bio || null,
+    hiredOn: hiredOn || null,
+    auditId: dependencies.createId(),
+    now: dependencies.now,
+  });
+  if (!result.updated) return { ok: false as const, status: 404, error: "profile_not_found" };
+  return { ok: true as const, status: 200 };
+}
+
+export async function updateUserAvatar(
+  input: { userId: string; mimeType?: unknown; base64?: unknown; remove?: unknown },
+  actor: SessionActor,
+  dependencies: Dependencies,
+) {
+  if (!USER_ID_PATTERN.test(input.userId)) return { ok: false as const, status: 422, error: "invalid_avatar" };
+  if (!canManageProfile(input.userId, actor)) return { ok: false as const, status: 403, error: "profile_forbidden" };
+  const remove = input.remove === true;
+  const mimeType = remove ? null : normalized(input.mimeType);
+  const base64 = remove ? null : normalized(input.base64);
+  const decodedBytes = base64 ? Math.ceil(base64.length * 3 / 4) : 0;
+  if (!remove && (!mimeType || !AVATAR_MIME_TYPES.has(mimeType) || !base64 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(base64) || decodedBytes > 163_840 || !validAvatarBytes(mimeType, base64))) {
+    return { ok: false as const, status: 422, error: "invalid_avatar" };
+  }
+  const result = await dependencies.repository.updateUserAvatar({
+    userId: input.userId,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    mimeType,
+    base64,
+    auditId: dependencies.createId(),
+    now: dependencies.now,
+  });
+  if (!result.updated) return { ok: false as const, status: 404, error: "profile_not_found" };
+  return { ok: true as const, status: 200 };
+}
+
+export async function resetSystem(
+  input: { password?: unknown; confirmation?: unknown },
+  actor: SessionActor,
+  dependencies: Dependencies,
+) {
+  if (actor.role !== "admin" || !actor.userId) return { ok: false as const, status: 403, error: "admin_required" };
+  if (input.confirmation !== "ELIMINAR TODO Y REINICIAR" || typeof input.password !== "string" || input.password.length > 128) {
+    return { ok: false as const, status: 422, error: "invalid_reset_confirmation" };
+  }
+  const credential = await dependencies.repository.findAdministratorCredential(actor.userId, actor.organizationId);
+  if (!credential || !await dependencies.verifyPassword(input.password, credential.passwordHash)) {
+    return { ok: false as const, status: 401, error: "invalid_reset_authorization" };
+  }
+  const result = await dependencies.repository.resetSystem({ organizationId: actor.organizationId, actorMembershipId: actor.membershipId, now: dependencies.now });
+  if (!result.reset) return { ok: false as const, status: 409, error: "reset_failed" };
   return { ok: true as const, status: 200 };
 }

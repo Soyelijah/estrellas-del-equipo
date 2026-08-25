@@ -266,7 +266,10 @@ export class D1AdminAuthRepository {
         team.id AS teamId, team.display_name AS teamDisplayName,
         team.login_identifier AS teamLoginIdentifier, team.status AS teamStatus,
         team_membership.role AS teamRole, team_membership.job_title AS teamJobTitle,
-        team_membership.tip_factor_hundredths AS teamTipFactorHundredths
+        team_membership.tip_factor_hundredths AS teamTipFactorHundredths,
+        profile.email AS teamEmail, profile.phone AS teamPhone, profile.bio AS teamBio,
+        profile.hired_on AS teamHiredOn,
+        CASE WHEN profile.avatar_base64 IS NULL THEN 0 ELSE 1 END AS teamHasAvatar
       FROM actor
       LEFT JOIN memberships team_membership
         ON team_membership.organization_id = actor.organizationId
@@ -274,6 +277,7 @@ export class D1AdminAuthRepository {
         AND team_membership.deleted_at IS NULL
       LEFT JOIN users team
         ON team.id = team_membership.user_id AND team.deleted_at IS NULL
+      LEFT JOIN user_profiles profile ON profile.user_id = team.id
       ORDER BY team.created_at, team.display_name
     `).bind(tokenHash, now).all<Record<string, unknown>>();
     if (rows.results.length === 0) return null;
@@ -296,6 +300,11 @@ export class D1AdminAuthRepository {
           role: row.teamRole,
           jobTitle: row.teamJobTitle,
           tipFactorHundredths: row.teamTipFactorHundredths,
+          email: row.teamEmail,
+          phone: row.teamPhone,
+          bio: row.teamBio,
+          hiredOn: row.teamHiredOn,
+          hasAvatar: Number(row.teamHasAvatar) === 1,
         })),
     };
   }
@@ -308,12 +317,15 @@ export class D1AdminAuthRepository {
   async listOrganizationUsers(organizationId: string) {
     const rows = await this.database.prepare(`
       SELECT u.id, u.display_name AS displayName, u.login_identifier AS loginIdentifier,
-        u.status, m.role, m.job_title AS jobTitle, m.tip_factor_hundredths AS tipFactorHundredths
+        u.status, m.role, m.job_title AS jobTitle, m.tip_factor_hundredths AS tipFactorHundredths,
+        p.email, p.phone, p.bio, p.hired_on AS hiredOn,
+        CASE WHEN p.avatar_base64 IS NULL THEN 0 ELSE 1 END AS hasAvatar
       FROM users u JOIN memberships m ON m.user_id = u.id
+      LEFT JOIN user_profiles p ON p.user_id = u.id
       WHERE m.organization_id = ? AND m.role <> 'admin' AND u.deleted_at IS NULL AND m.deleted_at IS NULL
       ORDER BY u.created_at, u.display_name
-    `).bind(organizationId).all<{ id: string; displayName: string; loginIdentifier: string; status: string; role: string; jobTitle: string; tipFactorHundredths: number }>();
-    return rows.results;
+    `).bind(organizationId).all<{ id: string; displayName: string; loginIdentifier: string; status: string; role: string; jobTitle: string; tipFactorHundredths: number; email: string | null; phone: string | null; bio: string | null; hiredOn: string | null; hasAvatar: number }>();
+    return rows.results.map((row) => ({ ...row, hasAvatar: Number(row.hasAvatar) === 1 }));
   }
 
   async getEvaluationOperations(organizationId: string) {
@@ -877,6 +889,83 @@ export class D1AdminAuthRepository {
       ),
     ]);
     return { deleted: true as const };
+  }
+
+  async updateUserProfile(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, string | null>;
+    const target = await this.database.prepare(`
+      SELECT u.id FROM users u JOIN memberships m ON m.user_id = u.id
+      WHERE u.id = ? AND m.organization_id = ? AND u.deleted_at IS NULL AND m.deleted_at IS NULL
+      LIMIT 1
+    `).bind(record.userId, record.organizationId).first<{ id: string }>();
+    if (!target) return { updated: false };
+    await this.database.batch([
+      this.database.prepare(`
+        INSERT INTO user_profiles (user_id, email, phone, bio, hired_on, updated_at, updated_by_membership_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET email = excluded.email, phone = excluded.phone,
+          bio = excluded.bio, hired_on = excluded.hired_on, updated_at = excluded.updated_at,
+          updated_by_membership_id = excluded.updated_by_membership_id
+      `).bind(record.userId, record.email, record.phone, record.bio, record.hiredOn, record.now, record.actorMembershipId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
+        VALUES (?, ?, ?, 'account.profile_updated', 'user', ?, '{}', ?)
+      `).bind(record.auditId, record.organizationId, record.actorMembershipId, record.userId, record.now),
+    ]);
+    return { updated: true };
+  }
+
+  async updateUserAvatar(rawRecord: Record<string, unknown>) {
+    const record = rawRecord as Record<string, string | null>;
+    const target = await this.database.prepare(`
+      SELECT u.id FROM users u JOIN memberships m ON m.user_id = u.id
+      WHERE u.id = ? AND m.organization_id = ? AND u.deleted_at IS NULL AND m.deleted_at IS NULL
+      LIMIT 1
+    `).bind(record.userId, record.organizationId).first<{ id: string }>();
+    if (!target) return { updated: false };
+    await this.database.batch([
+      this.database.prepare(`
+        INSERT INTO user_profiles (user_id, avatar_mime_type, avatar_base64, updated_at, updated_by_membership_id)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET avatar_mime_type = excluded.avatar_mime_type,
+          avatar_base64 = excluded.avatar_base64, updated_at = excluded.updated_at,
+          updated_by_membership_id = excluded.updated_by_membership_id
+      `).bind(record.userId, record.mimeType, record.base64, record.now, record.actorMembershipId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
+        VALUES (?, ?, ?, 'account.avatar_updated', 'user', ?, ?, ?)
+      `).bind(record.auditId, record.organizationId, record.actorMembershipId, record.userId, JSON.stringify({ removed: record.base64 === null }), record.now),
+    ]);
+    return { updated: true };
+  }
+
+  async findUserAvatar(userId: string, organizationId: string) {
+    return this.database.prepare(`
+      SELECT p.avatar_mime_type AS mimeType, p.avatar_base64 AS base64, p.updated_at AS updatedAt
+      FROM user_profiles p
+      JOIN memberships m ON m.user_id = p.user_id AND m.organization_id = ? AND m.deleted_at IS NULL
+      WHERE p.user_id = ? AND p.avatar_base64 IS NOT NULL
+      LIMIT 1
+    `).bind(organizationId, userId).first<{ mimeType: string; base64: string; updatedAt: string }>();
+  }
+
+  async findAdministratorCredential(userId: string, organizationId: string) {
+    return this.database.prepare(`
+      SELECT u.password_hash AS passwordHash
+      FROM users u JOIN memberships m ON m.user_id = u.id
+      WHERE u.id = ? AND m.organization_id = ? AND m.role = 'admin'
+        AND u.status = 'active' AND u.deleted_at IS NULL AND m.deleted_at IS NULL
+      LIMIT 1
+    `).bind(userId, organizationId).first<{ passwordHash: string }>();
+  }
+
+  async resetSystem() {
+    await this.database.batch([
+      this.database.prepare("DELETE FROM organizations"),
+      this.database.prepare("DELETE FROM users"),
+      this.database.prepare("DELETE FROM bootstrap_guards"),
+    ]);
+    return { reset: true };
   }
 
   async listAuditEvents(organizationId: string, limit: number) {

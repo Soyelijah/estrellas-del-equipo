@@ -69,7 +69,7 @@ const jobTitles = {
   cashier: "Cajera",
 } as const;
 type JobTitle = keyof typeof jobTitles;
-type Account = { displayName: string; role: string };
+type Account = { userId: string; displayName: string; role: string };
 type TeamMember = {
   id: string;
   displayName: string;
@@ -77,6 +77,11 @@ type TeamMember = {
   role: string;
   jobTitle: JobTitle;
   tipFactorHundredths: number;
+  email: string | null;
+  phone: string | null;
+  bio: string | null;
+  hiredOn: string | null;
+  hasAvatar: boolean;
 };
 type StoredUser = TeamMember & { loginIdentifier: string };
 type AuditEvent = {
@@ -250,6 +255,41 @@ function statusLabel(status: string) {
       : status;
 }
 
+async function prepareAvatar(file: File) {
+  if (!file.type.startsWith("image/") || file.size > 8 * 1024 * 1024) throw new Error("invalid_avatar");
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+    const size = Math.min(320, image.naturalWidth, image.naturalHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("invalid_avatar");
+    const crop = Math.min(image.naturalWidth, image.naturalHeight);
+    context.drawImage(image, (image.naturalWidth - crop) / 2, (image.naturalHeight - crop) / 2, crop, crop, 0, 0, size, size);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.82));
+    if (!blob || blob.size > 160 * 1024) throw new Error("invalid_avatar");
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("invalid_avatar"));
+      reader.readAsDataURL(blob);
+    });
+    return { mimeType: "image/webp", base64: dataUrl.split(",")[1] };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function ProfileAvatar({ member, className = "small" }: { member: Pick<TeamMember, "id" | "displayName" | "hasAvatar">; className?: string }) {
+  return member.hasAvatar
+    ? <img /* eslint-disable-line @next/next/no-img-element -- authenticated same-origin image endpoint */ className={`avatar ${className} profile-photo`} src={`/api/users/${member.id}/avatar`} alt={`Foto de ${member.displayName}`} />
+    : <span className={`avatar ${className}`} aria-hidden="true">{initials(member.displayName)}</span>;
+}
+
 export default function Home() {
   const [auth, setAuth] = useState<AuthState>(initialAuth);
   const [view, setView] = useState<AppView>("inicio");
@@ -326,6 +366,11 @@ export default function Home() {
       active = false;
     };
   }, []);
+  useEffect(() => {
+    const preventContextMenu = (event: MouseEvent) => event.preventDefault();
+    document.addEventListener("contextmenu", preventContextMenu);
+    return () => document.removeEventListener("contextmenu", preventContextMenu);
+  }, []);
 
   async function requestJson(
     path: string,
@@ -362,6 +407,10 @@ export default function Home() {
         "Revisa los datos y usa una contraseña de al menos 12 caracteres.",
       invalid_credentials: "Usuario o contraseña incorrectos.",
       login_identifier_exists: "Ese nombre de usuario ya está ocupado.",
+      invalid_profile: "Revisa el correo, teléfono, biografía y fecha de ingreso.",
+      invalid_avatar: "La foto no es válida o supera el tamaño permitido.",
+      invalid_reset_confirmation: "Escribe exactamente la frase de reinicio solicitada.",
+      invalid_reset_authorization: "La contraseña o la clave única no son correctas.",
       bootstrap_closed: "La cuenta administradora ya está configurada.",
       invalid_access_key: "La clave única no es válida.",
       setup_access_required: "Valida primero la clave única.",
@@ -478,14 +527,27 @@ export default function Home() {
     setMessage("");
     const form = event.currentTarget;
     try {
+      const formData = Object.fromEntries(new FormData(form));
       const { response, result } = await requestJson(
         path,
         method,
-        Object.fromEntries(new FormData(form)),
+        formData,
       );
       if (!response.ok) {
         setMessage(friendlyError(result.error));
         return;
+      }
+      if (method === "PATCH" && /^\/api\/admin\/users\/[0-9a-f-]+$/iu.test(path)) {
+        const profile = await requestJson(`${path}/profile`, "PATCH", {
+          email: formData.email,
+          phone: formData.phone,
+          bio: formData.bio,
+          hiredOn: formData.hiredOn,
+        });
+        if (!profile.response.ok) {
+          setMessage(friendlyError(profile.result.error));
+          return;
+        }
       }
       form.reset();
       setSelectedUserId(null);
@@ -519,6 +581,68 @@ export default function Home() {
       await refreshAuth();
     } catch {
       setMessage("No se pudo conectar con el sistema.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function updateAvatar(userId: string, file: File | null) {
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const payload = file ? await prepareAvatar(file) : {};
+      const { response, result } = await requestJson(`/api/admin/users/${userId}/avatar`, file ? "POST" : "DELETE", payload);
+      if (!response.ok) return setMessage(friendlyError(result.error));
+      setMessage(file ? "Foto de perfil actualizada." : "Foto de perfil eliminada.");
+      await refreshAuth();
+    } catch {
+      setMessage("Usa una imagen JPEG, PNG o WebP de hasta 8 MB.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function updateOwnAvatar(file: File | null) {
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const payload = file ? await prepareAvatar(file) : {};
+      const { response, result } = await requestJson("/api/account/avatar", file ? "POST" : "DELETE", payload);
+      if (!response.ok) return setMessage(friendlyError(result.error));
+      setMessage(file ? "Tu foto de perfil fue actualizada." : "Tu foto de perfil fue eliminada.");
+      await refreshAuth();
+    } catch {
+      setMessage("Usa una imagen JPEG, PNG o WebP de hasta 8 MB.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function updateOwnProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const { response, result } = await requestJson("/api/account/profile", "PATCH", Object.fromEntries(new FormData(event.currentTarget)));
+      if (!response.ok) return setMessage(friendlyError(result.error));
+      setMessage("Tu perfil profesional quedó actualizado.");
+      await refreshAuth();
+    } catch {
+      setMessage("No se pudo guardar tu perfil.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  async function resetAll(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const { response, result } = await requestJson("/api/admin/system/reset", "POST", Object.fromEntries(new FormData(event.currentTarget)));
+      if (!response.ok) return setMessage(friendlyError(result.error));
+      setSelectedUserId(null);
+      setView("inicio");
+      setMessage("");
+      await refreshAuth();
+    } catch {
+      setMessage("No se pudo completar el reinicio seguro.");
     } finally {
       setSubmitting(false);
     }
@@ -1008,7 +1132,13 @@ export default function Home() {
               }}
             />
           ) : (
-            <WorkerHome account={auth.account} team={auth.team} />
+            <WorkerHome
+              account={auth.account}
+              team={auth.team}
+              submitting={submitting}
+              updateProfile={updateOwnProfile}
+              updateAvatar={updateOwnAvatar}
+            />
           ))}
         {isAdmin && currentView === "equipo" && (
           <TeamAdmin
@@ -1018,6 +1148,8 @@ export default function Home() {
             selectUser={setSelectedUserId}
             submitAdmin={submitAdmin}
             changeStatus={changeStatus}
+            updateAvatar={updateAvatar}
+            resetAll={resetAll}
           />
         )}
         {isAdmin && currentView === "operacion" && (
@@ -1586,32 +1718,51 @@ function AdminHome({
 function WorkerHome({
   account,
   team,
+  submitting,
+  updateProfile,
+  updateAvatar,
 }: {
   account: Account;
   team: TeamMember[];
+  submitting: boolean;
+  updateProfile(event: FormEvent<HTMLFormElement>): Promise<void>;
+  updateAvatar(file: File | null): Promise<void>;
 }) {
+  const profile = team.find((member) => member.id === account.userId);
   return (
-    <section className="hero worker-hero">
-      <div className="hero-copy">
-        <span className="pill brass">JORNADA PERSONAL</span>
-        <h2>Bienvenido, {account.displayName}.</h2>
-        <p>
-          Tu cuenta identifica tus acciones. Las evaluaciones solo se habilitan
-          cuando exista un período y un turno real compartido.
-        </p>
-      </div>
-      <article className="setup-card">
-        <span className="section-kicker">EQUIPO VISIBLE</span>
-        <strong>
-          {team.filter((member) => member.status === "active").length} cuentas
-          activas
-        </strong>
-        <p>
-          Los factores mostrados en Propinas provienen del acuerdo registrado
-          por administración.
-        </p>
-      </article>
-    </section>
+    <div className="worker-home-stack">
+      <section className="hero worker-hero">
+        <div className="hero-copy">
+          <span className="pill brass">JORNADA PERSONAL</span>
+          <h2>Bienvenido, {account.displayName}.</h2>
+          <p>Tu cuenta identifica tus acciones. Las evaluaciones solo se habilitan cuando exista un período y un turno real compartido.</p>
+        </div>
+        <article className="setup-card">
+          <span className="section-kicker">EQUIPO VISIBLE</span>
+          <strong>{team.filter((member) => member.status === "active").length} cuentas activas</strong>
+          <p>Los factores mostrados en Propinas provienen del acuerdo registrado por administración.</p>
+        </article>
+      </section>
+      {profile && (
+        <form className="panel account-form own-profile" onSubmit={(event) => void updateProfile(event)}>
+          <div className="profile-editor-heading">
+            <ProfileAvatar member={profile} className="profile-preview" />
+            <div><span className="section-kicker">MI PERFIL</span><h3>Datos profesionales</h3><small>Tú decides si deseas usar una foto.</small></div>
+          </div>
+          <div className="own-profile-grid">
+            <label>Correo personal<input name="email" type="email" maxLength={254} defaultValue={profile.email ?? ""} autoComplete="email" /></label>
+            <label>Teléfono<input name="phone" type="tel" maxLength={32} defaultValue={profile.phone ?? ""} autoComplete="tel" /></label>
+            <label>Fecha de ingreso<input name="hiredOn" type="date" defaultValue={profile.hiredOn ?? ""} /></label>
+            <label className="profile-bio">Presentación profesional<textarea name="bio" maxLength={500} rows={3} defaultValue={profile.bio ?? ""} /></label>
+          </div>
+          <label className="avatar-upload">Foto opcional<input type="file" accept="image/jpeg,image/png,image/webp" disabled={submitting} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; if (file) void updateAvatar(file); }} /><small>Se recorta y optimiza antes de enviarse.</small></label>
+          <div className="form-actions">
+            <button className="primary" disabled={submitting}>Guardar mi perfil</button>
+            {profile.hasAvatar && <button className="secondary" type="button" disabled={submitting} onClick={() => void updateAvatar(null)}>Quitar foto</button>}
+          </div>
+        </form>
+      )}
+    </div>
   );
 }
 function Metric({
@@ -1644,6 +1795,8 @@ function TeamAdmin({
   selectUser,
   submitAdmin,
   changeStatus,
+  updateAvatar,
+  resetAll,
 }: {
   users: StoredUser[];
   selectedUser: StoredUser | null;
@@ -1655,6 +1808,8 @@ function TeamAdmin({
     method?: "POST" | "PATCH",
   ): Promise<void>;
   changeStatus(user: StoredUser): Promise<void>;
+  updateAvatar(userId: string, file: File | null): Promise<void>;
+  resetAll(event: FormEvent<HTMLFormElement>): Promise<void>;
 }) {
   return (
     <section className="data-section">
@@ -1707,18 +1862,59 @@ function TeamAdmin({
               <span className="section-kicker">EDICIÓN SEGURA</span>
               <h3>{selectedUser.displayName}</h3>
             </div>
-            <WorkerFields user={selectedUser} />
+             <WorkerFields user={selectedUser} />
+             <div className="profile-editor-heading">
+               <ProfileAvatar member={selectedUser} className="profile-preview" />
+               <div>
+                 <strong>Perfil profesional</strong>
+                 <small>Datos privados del trabajador y foto opcional.</small>
+               </div>
+             </div>
+             <label>
+               Correo personal
+               <input name="email" type="email" maxLength={254} defaultValue={selectedUser.email ?? ""} autoComplete="email" />
+             </label>
+             <label>
+               Teléfono
+               <input name="phone" type="tel" maxLength={32} defaultValue={selectedUser.phone ?? ""} autoComplete="tel" />
+             </label>
+             <label>
+               Fecha de ingreso
+               <input name="hiredOn" type="date" defaultValue={selectedUser.hiredOn ?? ""} />
+             </label>
+             <label>
+               Presentación profesional
+               <textarea name="bio" maxLength={500} rows={3} defaultValue={selectedUser.bio ?? ""} placeholder="Experiencia, fortalezas o responsabilidades dentro del salón." />
+             </label>
+             <label className="avatar-upload">
+               Foto de perfil opcional
+               <input
+                 type="file"
+                 accept="image/jpeg,image/png,image/webp"
+                 disabled={submitting}
+                 onChange={(event) => {
+                   const file = event.currentTarget.files?.[0] ?? null;
+                   if (file) void updateAvatar(selectedUser.id, file);
+                 }}
+               />
+               <small>La aplicación la recorta y optimiza automáticamente.</small>
+             </label>
             <div className="form-actions">
               <button className="primary" disabled={submitting}>
                 Guardar cambios
               </button>
-              <button
+               <button
                 className="secondary"
                 type="button"
                 onClick={() => selectUser(null)}
               >
-                Cancelar
-              </button>
+                 Cancelar
+               </button>
+               {selectedUser.hasAvatar && (
+                 <button className="text-action" type="button" disabled={submitting} onClick={() => void updateAvatar(selectedUser.id, null)}>
+                   Quitar foto
+                 </button>
+               )}
             </div>
           </form>
         ) : (
@@ -1745,9 +1941,7 @@ function TeamAdmin({
               key={user.id}
             >
               <div className="worker-identity">
-                <span className="avatar small">
-                  {initials(user.displayName)}
-                </span>
+                <ProfileAvatar member={user} />
                 <div>
                   <strong>{user.displayName}</strong>
                   <small>
@@ -1770,6 +1964,13 @@ function TeamAdmin({
                   {statusLabel(user.status)}
                 </span>
               </div>
+              {(user.email || user.phone || user.hiredOn) && (
+                <div className="worker-profile-summary">
+                  {user.email && <span>{user.email}</span>}
+                  {user.phone && <span>{user.phone}</span>}
+                  {user.hiredOn && <span>Desde {user.hiredOn}</span>}
+                </div>
+              )}
               <div className="worker-actions">
                 <button
                   className="secondary"
@@ -1791,6 +1992,19 @@ function TeamAdmin({
           ))}
         </div>
       )}
+      <form className="panel reset-zone" onSubmit={(event) => void resetAll(event)}>
+        <div>
+          <span className="section-kicker">ZONA DE REINICIO</span>
+          <h3>Volver a una instalación vacía</h3>
+          <p>Elimina permanentemente la cuenta administradora, trabajadores, turnos, evaluaciones, propinas, sesiones y auditoría. Después aparecerá nuevamente la creación del primer administrador.</p>
+        </div>
+        <div className="reset-fields">
+          <label>Contraseña actual<input name="password" type="password" required maxLength={128} autoComplete="current-password" /></label>
+          <label>Clave única<input name="accessKey" type="password" required autoComplete="off" /></label>
+          <label>Confirmación exacta<input name="confirmation" required autoComplete="off" placeholder="ELIMINAR TODO Y REINICIAR" /></label>
+        </div>
+        <button className="danger-action" disabled={submitting}>Eliminar todo y volver a cero</button>
+      </form>
     </section>
   );
 }

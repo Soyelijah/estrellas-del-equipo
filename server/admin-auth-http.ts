@@ -1,4 +1,4 @@
-import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, setManagedUserStatus, updateManagedUser } from "./admin-auth-service.ts";
+import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, resetSystem, setManagedUserStatus, updateManagedUser, updateUserAvatar, updateUserProfile } from "./admin-auth-service.ts";
 import { closeEvaluationCycle, deleteEvaluationCyclePermanently, deleteEvaluationShift, moderateEvaluationSubmission, openEvaluationCycle, registerEvaluationShift, voidMemberEvaluationHistory } from "./evaluation-admin-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
@@ -6,6 +6,7 @@ const COOKIE_NAME = "estrellas_session";
 const SETUP_COOKIE_NAME = "estrellas_setup";
 const RECOVERY_COOKIE_NAME = "estrellas_recovery";
 const MAX_JSON_BYTES = 8_192;
+const MAX_AVATAR_JSON_BYTES = 225_000;
 
 type AuthDependencies = {
   repository: {
@@ -18,6 +19,11 @@ type AuthDependencies = {
     updateManagedUser(record: Record<string, unknown>): Promise<{ updated: boolean; conflict: boolean }>;
     setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
     resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
+    updateUserProfile(record: Record<string, unknown>): Promise<{ updated: boolean }>;
+    updateUserAvatar(record: Record<string, unknown>): Promise<{ updated: boolean }>;
+    findUserAvatar(userId: string, organizationId: string): Promise<{ mimeType: string; base64: string; updatedAt: string } | null>;
+    findAdministratorCredential(userId: string, organizationId: string): Promise<{ passwordHash: string } | null>;
+    resetSystem(record: Record<string, string>): Promise<{ reset: boolean }>;
     findSessionActor(tokenHash: string, now: string): Promise<{ userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string } | null>;
     findSessionSnapshot(tokenHash: string, now: string): Promise<{
       actor: { userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string };
@@ -81,11 +87,11 @@ function recoveryCookie(request: Request, token: string, clear = false): string 
   return `${RECOVERY_COOKIE_NAME}=${clear ? "" : token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${clear ? 0 : 600}${secure}`;
 }
 
-async function readBody(request: Request): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; response: Response }> {
+async function readBody(request: Request, maxBytes = MAX_JSON_BYTES): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; response: Response }> {
   const declared = Number(request.headers.get("content-length") ?? 0);
-  if (Number.isFinite(declared) && declared > MAX_JSON_BYTES) return { ok: false, response: json({ ok: false, error: "payload_too_large" }, 413) };
+  if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, response: json({ ok: false, error: "payload_too_large" }, 413) };
   const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > MAX_JSON_BYTES) return { ok: false, response: json({ ok: false, error: "payload_too_large" }, 413) };
+  if (new TextEncoder().encode(raw).byteLength > maxBytes) return { ok: false, response: json({ ok: false, error: "payload_too_large" }, 413) };
   try {
     const body: unknown = JSON.parse(raw);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("invalid");
@@ -125,16 +131,31 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         role: member.role,
         jobTitle: member.jobTitle,
         tipFactorHundredths: member.tipFactorHundredths,
+        email: member.email,
+        phone: member.phone,
+        bio: member.bio,
+        hiredOn: member.hiredOn,
+        hasAvatar: member.hasAvatar,
       }));
       return json({
         ok: true,
         bootstrapAllowed: bootstrap.allowed,
         setupUnlocked,
         recoveryUnlocked,
-        account: actor ? { displayName: actor.displayName, role: actor.role } : null,
+        account: actor ? { userId: actor.userId, displayName: actor.displayName, role: actor.role } : null,
         users,
         team,
       });
+    }
+
+    const avatarReadMatch = path.match(/^\/api\/users\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/avatar$/iu);
+    if (avatarReadMatch && request.method === "GET") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const avatar = await dependencies.repository.findUserAvatar(avatarReadMatch[1], actor.organizationId);
+      if (!avatar) return json({ ok: false, error: "avatar_not_found" }, 404);
+      const binary = Uint8Array.from(atob(avatar.base64), (character) => character.charCodeAt(0));
+      return new Response(binary, { status: 200, headers: { "content-type": avatar.mimeType, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff", etag: `\"${avatar.updatedAt}\"` } });
     }
 
     if (path === "/api/admin/audit" && request.method === "GET") {
@@ -155,7 +176,7 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
 
     if (request.method !== "POST" && request.method !== "PATCH" && request.method !== "DELETE") return json({ ok: false, error: "method_not_allowed" }, 405, { allow: "GET, POST, PATCH, DELETE" });
     if (!isSameOriginMutation(request)) return json({ ok: false, error: "cross_origin_request" }, 403);
-    const parsed = await readBody(request);
+    const parsed = await readBody(request, path.endsWith("/avatar") ? MAX_AVATAR_JSON_BYTES : MAX_JSON_BYTES);
     if (!parsed.ok) return parsed.response;
     const serviceDependencies = { ...dependencies, now: dependencies.now() };
 
@@ -290,6 +311,28 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
       if (token) await dependencies.repository.revokeSession(await dependencies.hashToken(token), dependencies.now());
       return json({ ok: true }, 200, { "set-cookie": sessionCookie(request, "", true) });
     }
+    if (path === "/api/admin/system/reset") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      if (!dependencies.setupAccessConfigured || !await dependencies.verifySetupAccessKey(parsed.body.accessKey)) {
+        return json({ ok: false, error: "invalid_reset_authorization" }, 401);
+      }
+      const result = await resetSystem(parsed.body as never, actor, serviceDependencies);
+      return result.ok
+        ? json({ ok: true }, result.status, { "set-cookie": sessionCookie(request, "", true) })
+        : json({ ok: false, error: result.error }, result.status);
+    }
+    if (path === "/api/account/profile" || path === "/api/account/avatar") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      const result = path.endsWith("/avatar")
+        ? await updateUserAvatar({ ...parsed.body, userId: actor.userId, remove: request.method === "DELETE" } as never, actor, serviceDependencies)
+        : request.method === "PATCH"
+          ? await updateUserProfile({ ...parsed.body, userId: actor.userId } as never, actor, serviceDependencies)
+          : null;
+      if (!result) return json({ ok: false, error: "method_not_allowed" }, 405);
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
+    }
     if (path === "/api/admin/users") {
       const actor = await actorFor(request, dependencies);
       if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
@@ -298,7 +341,7 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         ? json({ ok: true, userId: result.userId, displayName: result.displayName }, result.status)
         : json({ ok: false, error: result.error }, result.status);
     }
-    const userRoute = path.match(/^\/api\/admin\/users\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/(status|password))?$/iu);
+    const userRoute = path.match(/^\/api\/admin\/users\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/(status|password|profile|avatar))?$/iu);
     if (userRoute) {
       const actor = await actorFor(request, dependencies);
       if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
@@ -307,6 +350,10 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         ? await setManagedUserStatus({ ...parsed.body, userId } as never, actor, serviceDependencies)
         : action === "password" && request.method === "POST"
           ? await resetManagedUserPassword({ ...parsed.body, userId } as never, actor, serviceDependencies)
+          : action === "profile" && request.method === "PATCH"
+            ? await updateUserProfile({ ...parsed.body, userId } as never, actor, serviceDependencies)
+            : action === "avatar" && (request.method === "POST" || request.method === "DELETE")
+              ? await updateUserAvatar({ ...parsed.body, userId, remove: request.method === "DELETE" } as never, actor, serviceDependencies)
           : !action && request.method === "PATCH"
             ? await updateManagedUser({ ...parsed.body, userId } as never, actor, serviceDependencies)
             : null;

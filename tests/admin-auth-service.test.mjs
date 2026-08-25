@@ -7,7 +7,10 @@ import {
   loginWithPassword,
   recoverAdministratorPassword,
   resetManagedUserPassword,
+  resetSystem,
   setManagedUserStatus,
+  updateUserAvatar,
+  updateUserProfile,
   updateManagedUser,
 } from "../server/admin-auth-service.ts";
 
@@ -19,7 +22,7 @@ const bootstrapInput = {
 };
 
 function dependencies(overrides = {}) {
-  const saved = { bootstrap: [], sessions: [], users: [], recoveries: [], updates: [], statuses: [], passwordResets: [] };
+  const saved = { bootstrap: [], sessions: [], users: [], recoveries: [], updates: [], statuses: [], passwordResets: [], profiles: [], avatars: [], resets: [] };
   let id = 0;
   return {
     saved,
@@ -33,6 +36,10 @@ function dependencies(overrides = {}) {
       async updateManagedUser(record) { saved.updates.push(record); return { updated: true, conflict: false }; },
       async setManagedUserStatus(record) { saved.statuses.push(record); return { updated: true }; },
       async resetManagedUserPassword(record) { saved.passwordResets.push(record); return { updated: true }; },
+      async updateUserProfile(record) { saved.profiles.push(record); return { updated: true }; },
+      async updateUserAvatar(record) { saved.avatars.push(record); return { updated: true }; },
+      async findAdministratorCredential() { return { passwordHash: "stored-password-hash" }; },
+      async resetSystem(record) { saved.resets.push(record); return { reset: true }; },
       ...overrides.repository,
     },
     createId: () => `id-${++id}`,
@@ -180,4 +187,34 @@ test("suspends and reactivates workers and resets credentials without retaining 
   assert.deepEqual(deps.saved.statuses.map((entry) => entry.status), ["suspended", "active"]);
   assert.equal(deps.saved.passwordResets[0].passwordHash, "stored-password-hash");
   assert.equal(JSON.stringify(deps.saved.passwordResets[0]).includes("Credencial privada nueva 2026"), false);
+});
+
+test("normalizes a professional profile and allows a worker to update only their own account", async () => {
+  const deps = dependencies();
+  const userId = "11111111-1111-4111-8111-111111111111";
+  const actor = { userId, role: "worker", organizationId: "org-1", membershipId: "m-worker" };
+  const accepted = await updateUserProfile({ userId, email: " GARZON@EXAMPLE.COM ", phone: " +56 9 1234 5678 ", bio: " Servicio responsable ", hiredOn: "2026-08-25" }, actor, deps);
+  const forbidden = await updateUserProfile({ userId: "22222222-2222-4222-8222-222222222222", email: "otro@example.com" }, actor, deps);
+  assert.deepEqual(accepted, { ok: true, status: 200 });
+  assert.deepEqual(forbidden, { ok: false, status: 403, error: "profile_forbidden" });
+  assert.equal(deps.saved.profiles[0].email, "garzon@example.com");
+  assert.equal(deps.saved.profiles[0].bio, "Servicio responsable");
+});
+
+test("accepts only a bounded raster profile image", async () => {
+  const deps = dependencies();
+  const userId = "11111111-1111-4111-8111-111111111111";
+  const actor = { userId, role: "admin", organizationId: "org-1", membershipId: "m-admin" };
+  assert.deepEqual(await updateUserAvatar({ userId, mimeType: "image/webp", base64: "UklGRgAAAABXRUJQ" }, actor, deps), { ok: true, status: 200 });
+  assert.deepEqual(await updateUserAvatar({ userId, mimeType: "image/svg+xml", base64: "PHN2Zz4=" }, actor, deps), { ok: false, status: 422, error: "invalid_avatar" });
+});
+
+test("resets the complete system only with the exact phrase and current administrator password", async () => {
+  const deps = dependencies();
+  const actor = { userId: "11111111-1111-4111-8111-111111111111", role: "admin", organizationId: "org-1", membershipId: "m-admin" };
+  const rejected = await resetSystem({ password: "wrong", confirmation: "ELIMINAR TODO Y REINICIAR" }, actor, deps);
+  const accepted = await resetSystem({ password: "valid-password", confirmation: "ELIMINAR TODO Y REINICIAR" }, actor, deps);
+  assert.deepEqual(rejected, { ok: false, status: 401, error: "invalid_reset_authorization" });
+  assert.deepEqual(accepted, { ok: true, status: 200 });
+  assert.equal(deps.saved.resets.length, 1);
 });

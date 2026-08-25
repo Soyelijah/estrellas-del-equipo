@@ -24,6 +24,11 @@ function dependencies(overrides = {}) {
       async updateManagedUser() { return { updated: true, conflict: false }; },
       async setManagedUserStatus() { return { updated: true }; },
       async resetManagedUserPassword() { return { updated: true }; },
+      async updateUserProfile() { return { updated: true }; },
+      async updateUserAvatar() { return { updated: true }; },
+      async findUserAvatar() { return null; },
+      async findAdministratorCredential() { return { passwordHash: "password-hash" }; },
+      async resetSystem() { return { reset: true }; },
       async findSessionActor() { return null; },
       async findSessionSnapshot() { return null; },
       async revokeSession() {},
@@ -136,7 +141,7 @@ test("loads authenticated status through one session snapshot without sequential
 
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.deepEqual(body.account, { displayName: "Roberto", role: "worker" });
+  assert.deepEqual(body.account, { userId: "u1", displayName: "Roberto", role: "worker" });
   assert.deepEqual(body.team, [{ id: "u2", displayName: "Compañera", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75 }]);
 });
 
@@ -392,4 +397,46 @@ test("lets only an administrator moderate one evaluation and bulk-void a persons
   assert.equal(calls.length, 2);
   assert.equal(calls[0].record.status, "voided");
   assert.equal(calls[1].record.scope, "all");
+});
+
+test("updates a worker profile and avatar only through an authenticated account", async () => {
+  const userId = "11111111-1111-4111-8111-111111111111";
+  const calls = [];
+  const actor = { userId: "22222222-2222-4222-8222-222222222222", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" };
+  const repository = {
+    async findSessionActor() { return actor; },
+    async updateUserProfile(record) { calls.push({ type: "profile", record }); return { updated: true }; },
+    async updateUserAvatar(record) { calls.push({ type: "avatar", record }); return { updated: true }; },
+  };
+  const headers = { cookie: "estrellas_session=private-cookie-token" };
+  const profile = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/profile`, { email: "garzon@example.com", phone: "+56912345678", bio: "Servicio", hiredOn: "2026-08-25" }, headers, "PATCH"), dependencies({ repository }));
+  const avatar = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/avatar`, { mimeType: "image/webp", base64: "UklGRgAAAABXRUJQ" }, headers), dependencies({ repository }));
+  assert.deepEqual([profile.status, avatar.status], [200, 200]);
+  assert.deepEqual(calls.map(({ type }) => type), ["profile", "avatar"]);
+});
+
+test("serves a private authenticated avatar with its real media type", async () => {
+  const userId = "11111111-1111-4111-8111-111111111111";
+  const response = await handleAdminAuthRequest(new Request(`https://equipo.example/api/users/${userId}/avatar`, { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository: {
+    async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" }; },
+    async findUserAvatar() { return { mimeType: "image/webp", base64: "UklGRgAAAABXRUJQ", updatedAt: "2026-08-25T00:00:00.000Z" }; },
+  } }));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/webp");
+  assert.equal(response.headers.get("cache-control"), "private, max-age=3600");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+});
+
+test("requires session, unique key, current password and exact phrase for a total reset", async () => {
+  let resets = 0;
+  const actor = { userId: "11111111-1111-4111-8111-111111111111", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" };
+  const repository = {
+    async findSessionActor() { return actor; },
+    async findAdministratorCredential() { return { passwordHash: "password-hash" }; },
+    async resetSystem() { resets += 1; return { reset: true }; },
+  };
+  const response = await handleAdminAuthRequest(mutation("/api/admin/system/reset", { accessKey: "clave-unica", password: "contraseña-real", confirmation: "ELIMINAR TODO Y REINICIAR" }, { cookie: "estrellas_session=private-cookie-token" }), dependencies({ repository, verifySetupAccessKey: async () => true }));
+  assert.equal(response.status, 200);
+  assert.equal(resets, 1);
+  assert.match(response.headers.get("set-cookie"), /^estrellas_session=; Path=\/; HttpOnly; SameSite=Strict; Max-Age=0; Secure$/);
 });
