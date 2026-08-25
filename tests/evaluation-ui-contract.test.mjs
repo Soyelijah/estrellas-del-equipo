@@ -120,7 +120,8 @@ test("presents login and administrator recovery in an accessible expanding conso
       page.indexOf('className="access-console-body"'),
   );
   assert.match(styles, /\.access-console:hover \.access-console-body/);
-  assert.match(styles, /grid-template-rows \.84s/);
+  assert.match(styles, /--console-open-duration: 1\.4s/);
+  assert.match(styles, /transition-delay: \.12s/);
   assert.match(styles, /\.access-console-trigger:hover \.console-lock::before/);
   assert.match(styles, /@media \(max-width: 900px\)/);
   assert.match(styles, /\.access-console \{ width: 100%; max-width: 560px;/);
