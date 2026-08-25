@@ -1,4 +1,4 @@
-import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, resetSystem, setManagedUserStatus, updateManagedUser, updateUserAvatar, updateUserProfile } from "./admin-auth-service.ts";
+import { bootstrapAdministrator, createManagedUser, deleteManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, resetSystem, setManagedUserStatus, updateManagedUser, updateUserAvatar, updateUserProfile } from "./admin-auth-service.ts";
 import { closeEvaluationCycle, deleteEvaluationCyclePermanently, deleteEvaluationShift, moderateEvaluationSubmission, openEvaluationCycle, registerEvaluationShift, voidMemberEvaluationHistory } from "./evaluation-admin-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
@@ -18,6 +18,7 @@ type AuthDependencies = {
     recoverAdministratorPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     updateManagedUser(record: Record<string, unknown>): Promise<{ updated: boolean; conflict: boolean }>;
     setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
+    deleteManagedUser(record: Record<string, string>): Promise<{ deleted: boolean; confirmationMismatch?: boolean }>;
     resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     updateUserProfile(record: Record<string, unknown>): Promise<{ updated: boolean }>;
     updateUserAvatar(record: Record<string, unknown>): Promise<{ updated: boolean }>;
@@ -412,6 +413,8 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
               ? await updateUserAvatar({ ...parsed.body, userId, remove: request.method === "DELETE" } as never, actor, serviceDependencies)
           : !action && request.method === "PATCH"
             ? await updateManagedUser({ ...parsed.body, userId } as never, actor, serviceDependencies)
+            : !action && request.method === "DELETE"
+              ? await deleteManagedUser({ ...parsed.body, userId } as never, actor, serviceDependencies)
             : null;
       if (!result) return json({ ok: false, error: "method_not_allowed" }, 405);
       return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);

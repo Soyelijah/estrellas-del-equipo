@@ -82,8 +82,10 @@ test("registers one general shift without asking for an area", () => {
   assert.match(page, /Cerrar confirmación/);
 });
 
-test("provides complete profiles, guarded reset, and kiosk-style interaction controls", () => {
-  assert.match(page, /Perfil profesional/);
+test("keeps complete profiles in each worker account, with guarded reset and kiosk controls", () => {
+  const adminTeamSection = page.slice(page.indexOf("function TeamAdmin"), page.indexOf("function WorkerFields"));
+  assert.match(page, /Datos profesionales/);
+  assert.doesNotMatch(adminTeamSection, /name="email"|name="phone"|name="hiredOn"|name="bio"|Foto de perfil/);
   assert.match(page, /name="email"/);
   assert.match(page, /name="phone"/);
   assert.match(page, /name="hiredOn"/);

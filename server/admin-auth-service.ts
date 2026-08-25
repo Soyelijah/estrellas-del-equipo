@@ -22,6 +22,7 @@ type Dependencies = {
     recoverAdministratorPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     updateManagedUser(record: Record<string, unknown>): Promise<{ updated: boolean; conflict: boolean }>;
     setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
+    deleteManagedUser(record: Record<string, string>): Promise<{ deleted: boolean; confirmationMismatch?: boolean }>;
     resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     updateUserProfile(record: Record<string, unknown>): Promise<{ updated: boolean }>;
     updateUserAvatar(record: Record<string, unknown>): Promise<{ updated: boolean }>;
@@ -221,6 +222,25 @@ export async function setManagedUserStatus(input: { userId: string; status: stri
   if (!USER_ID_PATTERN.test(input.userId) || !new Set(["active", "suspended"]).has(input.status)) return { ok: false as const, status: 422, error: "invalid_account_data" };
   const result = await dependencies.repository.setManagedUserStatus({ userId: input.userId, status: input.status, organizationId: actor.organizationId, actorMembershipId: actor.membershipId, auditId: dependencies.createId(), now: dependencies.now });
   if (!result.updated) return { ok: false as const, status: 404, error: "managed_user_not_found" };
+  return { ok: true as const, status: 200 };
+}
+
+export async function deleteManagedUser(input: { userId: string; confirmation?: unknown }, actor: SessionActor, dependencies: Dependencies) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403, error: "admin_required" };
+  const confirmation = normalizeLogin(input.confirmation);
+  if (!USER_ID_PATTERN.test(input.userId) || !LOGIN_PATTERN.test(confirmation)) {
+    return { ok: false as const, status: 422, error: "invalid_delete_confirmation" };
+  }
+  const result = await dependencies.repository.deleteManagedUser({
+    userId: input.userId,
+    confirmation,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    auditId: dependencies.createId(),
+    now: dependencies.now,
+  });
+  if (result.confirmationMismatch) return { ok: false as const, status: 422, error: "invalid_delete_confirmation" };
+  if (!result.deleted) return { ok: false as const, status: 404, error: "managed_user_not_found" };
   return { ok: true as const, status: 200 };
 }
 

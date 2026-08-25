@@ -228,6 +228,7 @@ const auditLabels: Record<string, string> = {
   "user.updated": "Datos actualizados",
   "user.suspended": "Cuenta suspendida",
   "user.reactivated": "Cuenta reactivada",
+  "user.deleted": "Cuenta eliminada",
   "user.password_reset": "Contraseña restablecida",
   "admin.password_recovered": "Acceso administrador recuperado",
   "evaluation.cycle_opened": "Ciclo de evaluación abierto",
@@ -423,6 +424,7 @@ export default function Home() {
       invalid_recovery: "No fue posible recuperar esa cuenta.",
       invalid_recovery_data: "Revisa el usuario y la nueva contraseña.",
       managed_user_not_found: "La cuenta ya no está disponible.",
+      invalid_delete_confirmation: "Escribe exactamente el usuario de la cuenta para confirmar su eliminación.",
       admin_required: "Esta acción requiere una cuenta administradora.",
       worker_required: "Esta sección está reservada para trabajadores.",
       invalid_evaluation_cycle: "Revisa el nombre y las fechas del ciclo.",
@@ -539,18 +541,6 @@ export default function Home() {
         setMessage(friendlyError(result.error));
         return;
       }
-      if (method === "PATCH" && /^\/api\/admin\/users\/[0-9a-f-]+$/iu.test(path)) {
-        const profile = await requestJson(`${path}/profile`, "PATCH", {
-          email: formData.email,
-          phone: formData.phone,
-          bio: formData.bio,
-          hiredOn: formData.hiredOn,
-        });
-        if (!profile.response.ok) {
-          setMessage(friendlyError(profile.result.error));
-          return;
-        }
-      }
       form.reset();
       setSelectedUserId(null);
       setMessage("Cambio guardado y registrado en la auditoría.");
@@ -587,17 +577,26 @@ export default function Home() {
       setSubmitting(false);
     }
   }
-  async function updateAvatar(userId: string, file: File | null) {
+  async function deleteUser(user: StoredUser, confirmation: string) {
     setSubmitting(true);
     setMessage("");
     try {
-      const payload = file ? await prepareAvatar(file) : {};
-      const { response, result } = await requestJson(`/api/admin/users/${userId}/avatar`, file ? "POST" : "DELETE", payload);
-      if (!response.ok) return setMessage(friendlyError(result.error));
-      setMessage(file ? "Foto de perfil actualizada." : "Foto de perfil eliminada.");
+      const { response, result } = await requestJson(
+        `/api/admin/users/${user.id}`,
+        "DELETE",
+        { confirmation },
+      );
+      if (!response.ok) {
+        setMessage(friendlyError(result.error));
+        return false;
+      }
+      setSelectedUserId(null);
+      setMessage(`La cuenta de ${user.displayName} fue eliminada. Su historial permanece protegido.`);
       await refreshAuth();
+      return true;
     } catch {
-      setMessage("Usa una imagen JPEG, PNG o WebP de hasta 8 MB.");
+      setMessage("No se pudo eliminar la cuenta.");
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -1151,7 +1150,7 @@ export default function Home() {
             selectUser={setSelectedUserId}
             submitAdmin={submitAdmin}
             changeStatus={changeStatus}
-            updateAvatar={updateAvatar}
+            deleteUser={deleteUser}
             resetAll={resetAll}
           />
         )}
@@ -1798,7 +1797,7 @@ function TeamAdmin({
   selectUser,
   submitAdmin,
   changeStatus,
-  updateAvatar,
+  deleteUser,
   resetAll,
 }: {
   users: StoredUser[];
@@ -1811,9 +1810,21 @@ function TeamAdmin({
     method?: "POST" | "PATCH",
   ): Promise<void>;
   changeStatus(user: StoredUser): Promise<void>;
-  updateAvatar(userId: string, file: File | null): Promise<void>;
+  deleteUser(user: StoredUser, confirmation: string): Promise<boolean>;
   resetAll(event: FormEvent<HTMLFormElement>): Promise<void>;
 }) {
+  const [deleteTarget, setDeleteTarget] = useState<StoredUser | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+
+  async function confirmDelete(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!deleteTarget) return;
+    if (await deleteUser(deleteTarget, deleteConfirmation)) {
+      setDeleteTarget(null);
+      setDeleteConfirmation("");
+    }
+  }
+
   return (
     <section className="data-section">
       <div className="section-heading">
@@ -1866,42 +1877,6 @@ function TeamAdmin({
               <h3>{selectedUser.displayName}</h3>
             </div>
              <WorkerFields user={selectedUser} />
-             <div className="profile-editor-heading">
-               <ProfileAvatar member={selectedUser} className="profile-preview" />
-               <div>
-                 <strong>Perfil profesional</strong>
-                 <small>Datos privados del trabajador y foto opcional.</small>
-               </div>
-             </div>
-             <label>
-               Correo personal
-               <input name="email" type="email" maxLength={254} defaultValue={selectedUser.email ?? ""} autoComplete="email" />
-             </label>
-             <label>
-               Teléfono
-               <input name="phone" type="tel" maxLength={32} defaultValue={selectedUser.phone ?? ""} autoComplete="tel" />
-             </label>
-             <label>
-               Fecha de ingreso
-               <input name="hiredOn" type="date" defaultValue={selectedUser.hiredOn ?? ""} />
-             </label>
-             <label>
-               Presentación profesional
-               <textarea name="bio" maxLength={500} rows={3} defaultValue={selectedUser.bio ?? ""} placeholder="Experiencia, fortalezas o responsabilidades dentro del salón." />
-             </label>
-             <label className="avatar-upload">
-               Foto de perfil opcional
-               <input
-                 type="file"
-                 accept="image/jpeg,image/png,image/webp"
-                 disabled={submitting}
-                 onChange={(event) => {
-                   const file = event.currentTarget.files?.[0] ?? null;
-                   if (file) void updateAvatar(selectedUser.id, file);
-                 }}
-               />
-               <small>La aplicación la recorta y optimiza automáticamente.</small>
-             </label>
             <div className="form-actions">
               <button className="primary" disabled={submitting}>
                 Guardar cambios
@@ -1913,11 +1888,6 @@ function TeamAdmin({
               >
                  Cancelar
                </button>
-               {selectedUser.hasAvatar && (
-                 <button className="text-action" type="button" disabled={submitting} onClick={() => void updateAvatar(selectedUser.id, null)}>
-                   Quitar foto
-                 </button>
-               )}
             </div>
           </form>
         ) : (
@@ -1967,13 +1937,6 @@ function TeamAdmin({
                   {statusLabel(user.status)}
                 </span>
               </div>
-              {(user.email || user.phone || user.hiredOn) && (
-                <div className="worker-profile-summary">
-                  {user.email && <span>{user.email}</span>}
-                  {user.phone && <span>{user.phone}</span>}
-                  {user.hiredOn && <span>Desde {user.hiredOn}</span>}
-                </div>
-              )}
               <div className="worker-actions">
                 <button
                   className="secondary"
@@ -1990,9 +1953,48 @@ function TeamAdmin({
                 >
                   {user.status === "active" ? "Suspender" : "Reactivar"}
                 </button>
+                <button
+                  className="delete-account-action"
+                  disabled={submitting}
+                  onClick={() => {
+                    setDeleteTarget(user);
+                    setDeleteConfirmation("");
+                  }}
+                >
+                  Eliminar
+                </button>
               </div>
             </article>
           ))}
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="confirmation-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setDeleteTarget(null);
+        }}>
+          <form className="account-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="account-delete-title" onSubmit={(event) => void confirmDelete(event)}>
+            <header>
+              <span className="danger-emblem" aria-hidden="true">×</span>
+              <div>
+                <span className="section-kicker">ELIMINACIÓN PROTEGIDA</span>
+                <h3 id="account-delete-title">Eliminar a {deleteTarget.displayName}</h3>
+              </div>
+            </header>
+            <p>La cuenta perderá el acceso y desaparecerá del equipo. Sus evaluaciones históricas conservarán su nombre para no alterar resultados anteriores.</p>
+            <label>
+              Escribe <b>{deleteTarget.loginIdentifier}</b> para confirmar
+              <input
+                autoFocus
+                value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                autoComplete="off"
+              />
+            </label>
+            <div className="dialog-actions">
+              <button className="secondary" type="button" disabled={submitting} onClick={() => setDeleteTarget(null)}>Cancelar</button>
+              <button className="delete-account-action" disabled={submitting || deleteConfirmation.trim().toLowerCase() !== deleteTarget.loginIdentifier.toLowerCase()}>Eliminar cuenta</button>
+            </div>
+          </form>
         </div>
       )}
       <form className="panel reset-zone" onSubmit={(event) => void resetAll(event)}>

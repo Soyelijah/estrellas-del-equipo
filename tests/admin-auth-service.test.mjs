@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   bootstrapAdministrator,
   createManagedUser,
+  deleteManagedUser,
   loginWithPassword,
   recoverAdministratorPassword,
   resetManagedUserPassword,
@@ -22,7 +23,7 @@ const bootstrapInput = {
 };
 
 function dependencies(overrides = {}) {
-  const saved = { bootstrap: [], sessions: [], users: [], recoveries: [], updates: [], statuses: [], passwordResets: [], profiles: [], avatars: [], resets: [] };
+  const saved = { bootstrap: [], sessions: [], users: [], recoveries: [], updates: [], statuses: [], deletions: [], passwordResets: [], profiles: [], avatars: [], resets: [] };
   let id = 0;
   return {
     saved,
@@ -35,6 +36,7 @@ function dependencies(overrides = {}) {
       async recoverAdministratorPassword(record) { saved.recoveries.push(record); return { updated: true }; },
       async updateManagedUser(record) { saved.updates.push(record); return { updated: true, conflict: false }; },
       async setManagedUserStatus(record) { saved.statuses.push(record); return { updated: true }; },
+      async deleteManagedUser(record) { saved.deletions.push(record); return { deleted: true }; },
       async resetManagedUserPassword(record) { saved.passwordResets.push(record); return { updated: true }; },
       async updateUserProfile(record) { saved.profiles.push(record); return { updated: true }; },
       async updateUserAvatar(record) { saved.avatars.push(record); return { updated: true }; },
@@ -187,6 +189,16 @@ test("suspends and reactivates workers and resets credentials without retaining 
   assert.deepEqual(deps.saved.statuses.map((entry) => entry.status), ["suspended", "active"]);
   assert.equal(deps.saved.passwordResets[0].passwordHash, "stored-password-hash");
   assert.equal(JSON.stringify(deps.saved.passwordResets[0]).includes("Credencial privada nueva 2026"), false);
+});
+
+test("deletes a managed worker only after the administrator confirms the exact login", async () => {
+  const deps = dependencies();
+  const actor = { role: "admin", organizationId: "org-1", membershipId: "m-admin" };
+  const userId = "11111111-1111-4111-8111-111111111111";
+  assert.deepEqual(await deleteManagedUser({ userId, confirmation: "" }, actor, deps), { ok: false, status: 422, error: "invalid_delete_confirmation" });
+  assert.deepEqual(await deleteManagedUser({ userId, confirmation: " GARZON.UNO " }, actor, deps), { ok: true, status: 200 });
+  assert.equal(deps.saved.deletions[0].confirmation, "garzon.uno");
+  assert.equal(deps.saved.deletions[0].organizationId, "org-1");
 });
 
 test("normalizes a professional profile and allows a worker to update only their own account", async () => {

@@ -23,6 +23,7 @@ function dependencies(overrides = {}) {
       async recoverAdministratorPassword() { return { updated: true }; },
       async updateManagedUser() { return { updated: true, conflict: false }; },
       async setManagedUserStatus() { return { updated: true }; },
+      async deleteManagedUser() { return { deleted: true }; },
       async resetManagedUserPassword() { return { updated: true }; },
       async updateUserProfile() { return { updated: true }; },
       async updateUserAvatar() { return { updated: true }; },
@@ -262,8 +263,9 @@ test("routes worker edit, lifecycle, and password reset only through an administ
   const edit = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}`, { displayName: "Garzón", loginIdentifier: "garzon", jobTitle: "waiter", tipPercentage: 65 }, headers, "PATCH"), dependencies({ repository: admin }));
   const status = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/status`, { status: "suspended" }, headers), dependencies({ repository: admin }));
   const password = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/password`, { newPassword: "Credencial privada nueva 2026" }, headers), dependencies({ repository: admin }));
+  const removal = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}`, { confirmation: "garzon" }, headers, "DELETE"), dependencies({ repository: admin }));
   const unauthorized = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/status`, { status: "suspended" }), dependencies());
-  assert.deepEqual([edit.status, status.status, password.status, unauthorized.status], [200, 200, 200, 401]);
+  assert.deepEqual([edit.status, status.status, password.status, removal.status, unauthorized.status], [200, 200, 200, 200, 401]);
 });
 
 test("rejects malformed worker resource identifiers before repository mutation", async () => {

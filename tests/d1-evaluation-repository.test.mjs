@@ -241,6 +241,32 @@ test("updates, suspends, reactivates, and resets only a worker in the administra
   assert.deepEqual(await repository.setManagedUserStatus({ userId: "11111111-1111-4111-8111-111111111111", organizationId: "other-org", actorMembershipId: "membership-admin", status: "suspended", auditId: "audit-other", now: "2026-08-22T15:00:00.000Z" }), { updated: false });
 });
 
+test("soft-deletes a worker, removes private profile data, revokes access, and preserves its auditable identity", async () => {
+  const { database, repository } = createEmptyAdminFixture();
+  await repository.saveBootstrap({
+    organization: { id: "org-1", name: "Restaurante", createdAt: "2026-08-22T12:00:00.000Z" },
+    user: { id: "admin-1", authSubject: "local:admin-1", displayName: "Jefe", loginIdentifier: "jefe", passwordHash: "admin-hash", status: "active", createdAt: "2026-08-22T12:00:00.000Z" },
+    membership: { id: "membership-admin", organizationId: "org-1", userId: "admin-1", role: "admin", joinedAt: "2026-08-22T12:00:00.000Z" },
+    guard: { key: "administrator_bootstrap", createdAt: "2026-08-22T12:00:00.000Z" },
+  });
+  const userId = "11111111-1111-4111-8111-111111111111";
+  await repository.createManagedUser({
+    user: { id: userId, authSubject: "local:worker-delete", displayName: "Garzón", loginIdentifier: "garzon", passwordHash: "worker-hash", jobTitle: "waiter", status: "active", createdAt: "2026-08-22T13:00:00.000Z" },
+    membership: { id: "membership-worker", organizationId: "org-1", userId, role: "worker", joinedAt: "2026-08-22T13:00:00.000Z", createdByMembershipId: "membership-admin", tipFactorHundredths: 65 },
+  });
+  await repository.updateUserProfile({ userId, organizationId: "org-1", actorMembershipId: "membership-admin", email: "privado@example.com", phone: null, bio: null, hiredOn: null, auditId: "audit-profile-delete", now: "2026-08-22T13:05:00.000Z" });
+  await repository.saveSession({ id: "session-delete", userId, tokenHash: "token-delete", expiresAt: "2026-08-23T00:00:00.000Z", createdAt: "2026-08-22T13:00:00.000Z" });
+
+  assert.deepEqual(await repository.deleteManagedUser({ userId, organizationId: "org-1", actorMembershipId: "membership-admin", confirmation: "otro", auditId: "audit-wrong", now: "2026-08-22T14:00:00.000Z" }), { deleted: false, confirmationMismatch: true });
+  assert.deepEqual(await repository.deleteManagedUser({ userId, organizationId: "org-1", actorMembershipId: "membership-admin", confirmation: "garzon", auditId: "audit-delete", now: "2026-08-22T14:00:00.000Z" }), { deleted: true });
+  const deleted = database.prepare("SELECT display_name, login_identifier, password_hash, status, deleted_at FROM users WHERE id = ?").get(userId);
+  assert.deepEqual({ ...deleted }, { display_name: "Garzón", login_identifier: `eliminado-${userId}`, password_hash: null, status: "disabled", deleted_at: "2026-08-22T14:00:00.000Z" });
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM user_profiles WHERE user_id = ?").get(userId).count, 0);
+  assert.equal(database.prepare("SELECT revoked_at FROM auth_sessions WHERE id = 'session-delete'").get().revoked_at, "2026-08-22T14:00:00.000Z");
+  assert.equal(database.prepare("SELECT action FROM audit_events WHERE id = 'audit-delete'").get().action, "user.deleted");
+  assert.deepEqual(await repository.listOrganizationUsers("org-1"), []);
+});
+
 test("lists sanitized audit events newest first and scoped to one organization", async () => {
   const { repository } = createEmptyAdminFixture();
   await repository.saveBootstrap({

@@ -223,6 +223,40 @@ export class D1AdminAuthRepository {
     return { updated: true as const };
   }
 
+  async deleteManagedUser(rawRecord: Record<string, string>) {
+    const target = await this.database.prepare(`
+      SELECT u.login_identifier AS loginIdentifier
+      FROM users u JOIN memberships m ON m.user_id = u.id
+      WHERE u.id = ? AND m.organization_id = ? AND m.role <> 'admin'
+        AND u.deleted_at IS NULL AND m.deleted_at IS NULL
+      LIMIT 1
+    `).bind(rawRecord.userId, rawRecord.organizationId).first<{ loginIdentifier: string }>();
+    if (!target) return { deleted: false as const };
+    if (target.loginIdentifier !== rawRecord.confirmation) {
+      return { deleted: false as const, confirmationMismatch: true as const };
+    }
+    const archivedLogin = `eliminado-${rawRecord.userId}`;
+    await this.database.batch([
+      this.database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+        .bind(rawRecord.now, rawRecord.userId),
+      this.database.prepare("DELETE FROM user_profiles WHERE user_id = ?")
+        .bind(rawRecord.userId),
+      this.database.prepare(`
+        UPDATE memberships SET ends_at = ?, deleted_at = ?, updated_at = ?
+        WHERE user_id = ? AND organization_id = ? AND role <> 'admin' AND deleted_at IS NULL
+      `).bind(rawRecord.now, rawRecord.now, rawRecord.now, rawRecord.userId, rawRecord.organizationId),
+      this.database.prepare(`
+        UPDATE users SET login_identifier = ?, password_hash = NULL, status = 'disabled', deleted_at = ?, updated_at = ?
+        WHERE id = ? AND deleted_at IS NULL
+      `).bind(archivedLogin, rawRecord.now, rawRecord.now, rawRecord.userId),
+      this.database.prepare(`
+        INSERT INTO audit_events (id, organization_id, actor_membership_id, action, object_type, object_id, metadata_json, created_at)
+        VALUES (?, ?, ?, 'user.deleted', 'user', ?, ?, ?)
+      `).bind(rawRecord.auditId, rawRecord.organizationId, rawRecord.actorMembershipId, rawRecord.userId, JSON.stringify({ loginIdentifier: target.loginIdentifier }), rawRecord.now),
+    ]);
+    return { deleted: true as const };
+  }
+
   async resetManagedUserPassword(rawRecord: Record<string, string>) {
     if (!await this.managedTarget(rawRecord.userId, rawRecord.organizationId)) return { updated: false as const };
     await this.database.batch([
