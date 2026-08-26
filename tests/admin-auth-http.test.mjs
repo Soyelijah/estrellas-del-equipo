@@ -23,12 +23,14 @@ function dependencies(overrides = {}) {
       async recoverAdministratorPassword() { return { updated: true }; },
       async updateManagedUser() { return { updated: true, conflict: false }; },
       async setManagedUserStatus() { return { updated: true }; },
+      async deleteManagedUser() { return { deleted: true }; },
       async resetManagedUserPassword() { return { updated: true }; },
       async updateUserProfile() { return { updated: true }; },
       async updateUserAvatar() { return { updated: true }; },
       async findUserAvatar() { return null; },
       async findAdministratorCredential() { return { passwordHash: "password-hash" }; },
       async resetSystem() { return { reset: true }; },
+      async purgeOperationalHistory() { return { purged: true }; },
       async findSessionActor() { return null; },
       async findSessionSnapshot() { return null; },
       async revokeSession() {},
@@ -236,6 +238,7 @@ test("rejects every unsupported sensitive-route verb before parsing a body or ca
     [`/api/admin/evaluation-shifts/${identifier}`, "PATCH", "DELETE"],
     [`/api/admin/evaluation-submissions/${identifier}/status`, "POST", "PATCH"],
     [`/api/admin/evaluation-history/${identifier}`, "POST", "DELETE"],
+    [`/api/admin/users/${identifier}`, "POST", "PATCH, DELETE"],
   ];
 
   for (const [path, method, allow] of cases) {
@@ -262,8 +265,9 @@ test("routes worker edit, lifecycle, and password reset only through an administ
   const edit = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}`, { displayName: "Garzón", loginIdentifier: "garzon", jobTitle: "waiter", tipPercentage: 65 }, headers, "PATCH"), dependencies({ repository: admin }));
   const status = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/status`, { status: "suspended" }, headers), dependencies({ repository: admin }));
   const password = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/password`, { newPassword: "Credencial privada nueva 2026" }, headers), dependencies({ repository: admin }));
+  const removal = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}`, { confirmation: "garzon" }, headers, "DELETE"), dependencies({ repository: admin }));
   const unauthorized = await handleAdminAuthRequest(mutation(`/api/admin/users/${userId}/status`, { status: "suspended" }), dependencies());
-  assert.deepEqual([edit.status, status.status, password.status, unauthorized.status], [200, 200, 200, 401]);
+  assert.deepEqual([edit.status, status.status, password.status, removal.status, unauthorized.status], [200, 200, 200, 200, 401]);
 });
 
 test("rejects malformed worker resource identifiers before repository mutation", async () => {
@@ -490,6 +494,14 @@ test("requires session, unique key, current password and exact phrase for a tota
   assert.equal(response.status, 200);
   assert.equal(resets, 1);
   assert.match(response.headers.get("set-cookie"), /^estrellas_session=; Path=\/; HttpOnly; SameSite=Strict; Max-Age=0; Secure$/);
+});
+
+test("requires administrator session and the unique setup key for an operational history purge", async () => {
+  const headers = { cookie: "estrellas_session=private-cookie-token" };
+  const actor = { async findSessionActor() { return { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m1" }; } };
+  const accepted = await handleAdminAuthRequest(mutation("/api/admin/system/purge-history", { accessKey: "unique-key", password: "password", confirmation: "BORRAR HISTORIAL OPERATIVO" }, headers), dependencies({ repository: actor, verifySetupAccessKey: async () => true }));
+  const rejectedKey = await handleAdminAuthRequest(mutation("/api/admin/system/purge-history", { accessKey: "wrong", password: "password", confirmation: "BORRAR HISTORIAL OPERATIVO" }, headers), dependencies({ repository: actor, verifySetupAccessKey: async () => false }));
+  assert.deepEqual([accepted.status, rejectedKey.status], [200, 401]);
 });
 
 test("distinguishes a rejected reset key from a rejected current password for the signed-in administrator", async () => {

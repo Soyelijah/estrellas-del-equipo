@@ -22,11 +22,13 @@ type Dependencies = {
     recoverAdministratorPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     updateManagedUser(record: Record<string, unknown>): Promise<{ updated: boolean; conflict: boolean }>;
     setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
+    deleteManagedUser(record: Record<string, string>): Promise<{ deleted: boolean; confirmationMismatch?: boolean }>;
     resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     updateUserProfile(record: Record<string, unknown>): Promise<{ updated: boolean }>;
     updateUserAvatar(record: Record<string, unknown>): Promise<{ updated: boolean }>;
     findAdministratorCredential(userId: string, organizationId: string): Promise<{ passwordHash: string } | null>;
     resetSystem(record: Record<string, string>): Promise<{ reset: boolean }>;
+    purgeOperationalHistory(record: Record<string, string>): Promise<{ purged: boolean }>;
   };
   createId(): string;
   createToken(): string;
@@ -224,6 +226,25 @@ export async function setManagedUserStatus(input: { userId: string; status: stri
   return { ok: true as const, status: 200 };
 }
 
+export async function deleteManagedUser(input: { userId: string; confirmation?: unknown }, actor: SessionActor, dependencies: Dependencies) {
+  if (actor.role !== "admin") return { ok: false as const, status: 403, error: "admin_required" };
+  const confirmation = normalizeLogin(input.confirmation);
+  if (!USER_ID_PATTERN.test(input.userId) || !LOGIN_PATTERN.test(confirmation)) {
+    return { ok: false as const, status: 422, error: "invalid_delete_confirmation" };
+  }
+  const result = await dependencies.repository.deleteManagedUser({
+    userId: input.userId,
+    confirmation,
+    organizationId: actor.organizationId,
+    actorMembershipId: actor.membershipId,
+    auditId: dependencies.createId(),
+    now: dependencies.now,
+  });
+  if (result.confirmationMismatch) return { ok: false as const, status: 422, error: "invalid_delete_confirmation" };
+  if (!result.deleted) return { ok: false as const, status: 404, error: "managed_user_not_found" };
+  return { ok: true as const, status: 200 };
+}
+
 export async function resetManagedUserPassword(input: { userId: string; newPassword: string }, actor: SessionActor, dependencies: Dependencies) {
   if (actor.role !== "admin") return { ok: false as const, status: 403, error: "admin_required" };
   if (!USER_ID_PATTERN.test(input.userId) || typeof input.newPassword !== "string" || input.newPassword.length < 12 || input.newPassword.length > 128) return { ok: false as const, status: 422, error: "invalid_account_data" };
@@ -310,5 +331,23 @@ export async function resetSystem(
   }
   const result = await dependencies.repository.resetSystem({ organizationId: actor.organizationId, actorMembershipId: actor.membershipId, now: dependencies.now });
   if (!result.reset) return { ok: false as const, status: 409, error: "reset_failed" };
+  return { ok: true as const, status: 200 };
+}
+
+export async function purgeOperationalHistory(
+  input: { password?: unknown; confirmation?: unknown },
+  actor: SessionActor,
+  dependencies: Dependencies,
+) {
+  if (actor.role !== "admin" || !actor.userId) return { ok: false as const, status: 403, error: "admin_required" };
+  if (input.confirmation !== "BORRAR HISTORIAL OPERATIVO" || typeof input.password !== "string" || input.password.length > 128) {
+    return { ok: false as const, status: 422, error: "invalid_history_purge_confirmation" };
+  }
+  const credential = await dependencies.repository.findAdministratorCredential(actor.userId, actor.organizationId);
+  if (!credential || !await dependencies.verifyPassword(input.password, credential.passwordHash)) {
+    return { ok: false as const, status: 401, error: "invalid_reset_password" };
+  }
+  const result = await dependencies.repository.purgeOperationalHistory({ organizationId: actor.organizationId, now: dependencies.now });
+  if (!result.purged) return { ok: false as const, status: 409, error: "history_purge_failed" };
   return { ok: true as const, status: 200 };
 }

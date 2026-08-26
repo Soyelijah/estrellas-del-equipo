@@ -1,4 +1,4 @@
-import { bootstrapAdministrator, createManagedUser, loginWithPassword, recoverAdministratorPassword, resetManagedUserPassword, resetSystem, setManagedUserStatus, updateManagedUser, updateUserAvatar, updateUserProfile } from "./admin-auth-service.ts";
+import { bootstrapAdministrator, createManagedUser, deleteManagedUser, loginWithPassword, purgeOperationalHistory, recoverAdministratorPassword, resetManagedUserPassword, resetSystem, setManagedUserStatus, updateManagedUser, updateUserAvatar, updateUserProfile } from "./admin-auth-service.ts";
 import { closeEvaluationCycle, deleteEvaluationCyclePermanently, deleteEvaluationShift, moderateEvaluationSubmission, openEvaluationCycle, registerEvaluationShift, voidMemberEvaluationHistory } from "./evaluation-admin-service.ts";
 import { isSameOriginMutation } from "./request-security.ts";
 
@@ -18,12 +18,14 @@ type AuthDependencies = {
     recoverAdministratorPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     updateManagedUser(record: Record<string, unknown>): Promise<{ updated: boolean; conflict: boolean }>;
     setManagedUserStatus(record: Record<string, string>): Promise<{ updated: boolean }>;
+    deleteManagedUser(record: Record<string, string>): Promise<{ deleted: boolean; confirmationMismatch?: boolean }>;
     resetManagedUserPassword(record: Record<string, string>): Promise<{ updated: boolean }>;
     updateUserProfile(record: Record<string, unknown>): Promise<{ updated: boolean }>;
     updateUserAvatar(record: Record<string, unknown>): Promise<{ updated: boolean }>;
     findUserAvatar(userId: string, organizationId: string): Promise<{ mimeType: string; base64: string; updatedAt: string } | null>;
     findAdministratorCredential(userId: string, organizationId: string): Promise<{ passwordHash: string } | null>;
     resetSystem(record: Record<string, string>): Promise<{ reset: boolean }>;
+    purgeOperationalHistory(record: Record<string, string>): Promise<{ purged: boolean }>;
     findSessionActor(tokenHash: string, now: string): Promise<{ userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string } | null>;
     findSessionSnapshot(tokenHash: string, now: string): Promise<{
       actor: { userId: string; displayName: string; role: "admin" | "team_lead" | "worker" | "independent_reviewer"; organizationId: string; membershipId: string };
@@ -130,7 +132,7 @@ function allowedMethodsForPath(path: string): string[] | null {
 
   const userRoute = path.match(/^\/api\/admin\/users\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?:\/(status|password|profile|avatar))?$/iu);
   if (!userRoute) return null;
-  if (!userRoute[1]) return ["PATCH"];
+  if (!userRoute[1]) return ["PATCH", "DELETE"];
   if (userRoute[1] === "avatar") return ["POST", "DELETE"];
   return userRoute[1] === "profile" ? ["PATCH"] : ["POST"];
 }
@@ -378,6 +380,15 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
         ? json({ ok: true }, result.status, { "set-cookie": sessionCookie(request, "", true) })
         : json({ ok: false, error: result.error }, result.status);
     }
+    if (path === "/api/admin/system/purge-history") {
+      const actor = await actorFor(request, dependencies);
+      if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
+      if (!dependencies.setupAccessConfigured || !await dependencies.verifySetupAccessKey(parsed.body.accessKey)) {
+        return json({ ok: false, error: "invalid_reset_access_key" }, 401);
+      }
+      const result = await purgeOperationalHistory(parsed.body as never, actor, serviceDependencies);
+      return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);
+    }
     if (path === "/api/account/profile" || path === "/api/account/avatar") {
       const actor = await actorFor(request, dependencies);
       if (!actor) return json({ ok: false, error: "authentication_required" }, 401);
@@ -412,6 +423,8 @@ export async function handleAdminAuthRequest(request: Request, dependencies: Aut
               ? await updateUserAvatar({ ...parsed.body, userId, remove: request.method === "DELETE" } as never, actor, serviceDependencies)
           : !action && request.method === "PATCH"
             ? await updateManagedUser({ ...parsed.body, userId } as never, actor, serviceDependencies)
+            : !action && request.method === "DELETE"
+              ? await deleteManagedUser({ ...parsed.body, userId } as never, actor, serviceDependencies)
             : null;
       if (!result) return json({ ok: false, error: "method_not_allowed" }, 405);
       return result.ok ? json({ ok: true }, result.status) : json({ ok: false, error: result.error }, result.status);

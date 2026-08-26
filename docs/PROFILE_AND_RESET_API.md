@@ -6,6 +6,8 @@
 - `POST /api/admin/users/:userId/avatar`: el administrador guarda o reemplaza la foto de perfil.
 - `DELETE /api/admin/users/:userId/avatar`: el administrador elimina la foto.
 - `PATCH /api/account/profile`: cada trabajador modifica sus propios datos personales permitidos.
+- `DELETE /api/admin/users/:userId`: elimina el acceso y los datos privados de un trabajador tras confirmar su usuario; conserva su identidad histórica para auditoría y resultados.
+- `POST /api/admin/system/purge-history`: elimina de forma atómica ciclos, turnos, evaluaciones, resultados, acuerdos históricos y auditoría; conserva cuentas, perfiles, credenciales, factores y sesiones.
 - `POST /api/account/avatar` y `DELETE /api/account/avatar`: cada trabajador administra su foto.
 - `GET /api/users/:userId/avatar`: entrega la imagen, sin exponerla en `/api/auth/status`.
 

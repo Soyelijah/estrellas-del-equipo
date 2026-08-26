@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   bootstrapAdministrator,
   createManagedUser,
+  deleteManagedUser,
   loginWithPassword,
+  purgeOperationalHistory,
   recoverAdministratorPassword,
   resetManagedUserPassword,
   resetSystem,
@@ -22,7 +24,7 @@ const bootstrapInput = {
 };
 
 function dependencies(overrides = {}) {
-  const saved = { bootstrap: [], sessions: [], users: [], recoveries: [], updates: [], statuses: [], passwordResets: [], profiles: [], avatars: [], resets: [] };
+  const saved = { bootstrap: [], sessions: [], users: [], recoveries: [], updates: [], statuses: [], deletions: [], passwordResets: [], profiles: [], avatars: [], resets: [], purges: [] };
   let id = 0;
   return {
     saved,
@@ -35,11 +37,13 @@ function dependencies(overrides = {}) {
       async recoverAdministratorPassword(record) { saved.recoveries.push(record); return { updated: true }; },
       async updateManagedUser(record) { saved.updates.push(record); return { updated: true, conflict: false }; },
       async setManagedUserStatus(record) { saved.statuses.push(record); return { updated: true }; },
+      async deleteManagedUser(record) { saved.deletions.push(record); return { deleted: true }; },
       async resetManagedUserPassword(record) { saved.passwordResets.push(record); return { updated: true }; },
       async updateUserProfile(record) { saved.profiles.push(record); return { updated: true }; },
       async updateUserAvatar(record) { saved.avatars.push(record); return { updated: true }; },
       async findAdministratorCredential() { return { passwordHash: "stored-password-hash" }; },
       async resetSystem(record) { saved.resets.push(record); return { reset: true }; },
+      async purgeOperationalHistory(record) { saved.purges.push(record); return { purged: true }; },
       ...overrides.repository,
     },
     createId: () => `id-${++id}`,
@@ -189,6 +193,16 @@ test("suspends and reactivates workers and resets credentials without retaining 
   assert.equal(JSON.stringify(deps.saved.passwordResets[0]).includes("Credencial privada nueva 2026"), false);
 });
 
+test("deletes a managed worker only after the administrator confirms the exact login", async () => {
+  const deps = dependencies();
+  const actor = { role: "admin", organizationId: "org-1", membershipId: "m-admin" };
+  const userId = "11111111-1111-4111-8111-111111111111";
+  assert.deepEqual(await deleteManagedUser({ userId, confirmation: "" }, actor, deps), { ok: false, status: 422, error: "invalid_delete_confirmation" });
+  assert.deepEqual(await deleteManagedUser({ userId, confirmation: " GARZON.UNO " }, actor, deps), { ok: true, status: 200 });
+  assert.equal(deps.saved.deletions[0].confirmation, "garzon.uno");
+  assert.equal(deps.saved.deletions[0].organizationId, "org-1");
+});
+
 test("normalizes a professional profile and allows a worker to update only their own account", async () => {
   const deps = dependencies();
   const userId = "11111111-1111-4111-8111-111111111111";
@@ -217,4 +231,14 @@ test("resets the complete system only with the exact phrase and current administ
   assert.deepEqual(rejected, { ok: false, status: 401, error: "invalid_reset_password" });
   assert.deepEqual(accepted, { ok: true, status: 200 });
   assert.equal(deps.saved.resets.length, 1);
+});
+
+test("purges operational history only with the exact phrase and current administrator password", async () => {
+  const deps = dependencies();
+  const actor = { userId: "admin-1", role: "admin", organizationId: "org-1", membershipId: "membership-admin" };
+  assert.deepEqual(await purgeOperationalHistory({ password: "valid-password", confirmation: "incorrecta" }, actor, deps), { ok: false, status: 422, error: "invalid_history_purge_confirmation" });
+  assert.deepEqual(await purgeOperationalHistory({ password: "wrong", confirmation: "BORRAR HISTORIAL OPERATIVO" }, actor, deps), { ok: false, status: 401, error: "invalid_reset_password" });
+  assert.deepEqual(await purgeOperationalHistory({ password: "valid-password", confirmation: "BORRAR HISTORIAL OPERATIVO" }, actor, deps), { ok: true, status: 200 });
+  assert.equal(deps.saved.purges.length, 1);
+  assert.equal(deps.saved.purges[0].organizationId, "org-1");
 });
