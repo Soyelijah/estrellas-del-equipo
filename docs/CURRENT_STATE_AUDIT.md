@@ -1,72 +1,44 @@
 # Auditoría del estado actual
 
-Fecha de verificación: 2026-08-15
-Versión revisada: Sites v2, commit `612b5bb453b49293839c7dc2587eaa60f32225e5`
+Fecha de verificación: 2026-08-25
+Fuente revisada: GitHub `main`, commit `3ef7b7b727cb8ff36de24134ba7862279e22eec4`
 
 ## Veredicto
 
-El proyecto tiene una base visual, reglas de justicia, esquema y endpoint protegido, pero todavía no está activado para recopilar evaluaciones reales. La interfaz ya no presenta datos ficticios: muestra únicamente la configuración confirmada y estados vacíos hasta completar cuentas, D1, turnos y períodos.
+El proyecto ya no es un prototipo estático. La fuente actual implementa cuentas reales, sesiones protegidas, persistencia D1, perfiles privados, ciclos, turnos, evaluaciones por estrellas, resultados mensuales y controles administrativos auditados. La publicación vigente debe actualizarse con una nueva versión de Sites antes de considerar que producción contiene exactamente este commit.
 
 ## Evidencia del estado
 
-| Área | Estado confirmado | Evidencia | Riesgo |
+| Área | Estado confirmado | Evidencia actual | Verificación pendiente |
 |---|---|---|---|
-| Datos | Nombres, resultados, alertas y recompensas están codificados en el cliente | `app/page.tsx` | La pantalla puede confundirse con información real |
-| Persistencia | El esquema está vacío y D1 está deshabilitado | `db/schema.ts`, `.openai/hosting.json` | Las valoraciones desaparecen y no existe historial |
-| Identidad | Existe un helper de identidad, pero la página no lo usa | `app/chatgpt-auth.ts`, `app/page.tsx` | No se conoce realmente al usuario |
-| Autorización | No se habilita ninguna vista personal o administrativa sin sesión | `app/page.tsx` | Falta conectar la identidad real a la interfaz |
-| Evaluación | El formulario visible está deshabilitado hasta que haya turno y cuenta | `app/page.tsx` | El endpoint existe, pero la UI aún no lo consume |
-| Reglas de justicia | El dominio y la API validan elegibilidad, cobertura y respuestas | `domain/`, `server/` | Falta operar estas reglas con D1 migrada |
-| Recompensas | Beneficios y progreso son datos de muestra | `app/page.tsx` | No hay aprobación, presupuesto ni trazabilidad |
-| Disciplina | Solo aparece un castigo por omisión en el contenido | `app/page.tsx` | No existe procedimiento, descargos ni separación de funciones |
-| Pruebas | Una prueba confirma render y metadato de desarrollo | `tests/rendered-html.test.mjs` | No cubre conducta, seguridad, justicia ni accesibilidad |
-| Compilación | Build de producción y prueba existente aprobados | `npm test`, 2026-08-15 | Prueba integridad técnica mínima, no aptitud operativa |
+| Datos | La interfaz deriva cuentas, turnos, evaluaciones y resultados desde la API; no inventa personas ni puntajes | `app/page.tsx`, `tests/evaluation-ui-contract.test.mjs` | Prueba visual posterior al próximo despliegue |
+| Persistencia | D1 almacena organizaciones, usuarios, sesiones, perfiles, turnos, evaluaciones, acuerdos y auditoría | `db/schema.ts`, `drizzle/`, `server/d1-admin-auth-repository.ts`, `server/d1-evaluation-repository.ts` | Confirmar respaldo y consultas en la base de producción después del despliegue |
+| Identidad | Activación única del administrador, acceso por usuario y contraseña, recuperación protegida y sesiones con hash | `server/admin-auth-service.ts`, `server/admin-auth-http.ts` | Prueba real con cada tipo de cuenta en producción |
+| Autorización | Las rutas administrativas y personales derivan al actor desde la sesión y validan rol, organización, origen y método HTTP | `server/admin-auth-http.ts`, `server/evaluation-http.ts` | Mantener pruebas de regresión al agregar rutas |
+| Privacidad | Un trabajador ve sus propios datos privados, pero no correo, teléfono, biografía, fecha de ingreso ni usuario de otros compañeros; el administrador conserva la vista necesaria | `server/admin-auth-http.ts`, `tests/admin-auth-http.test.mjs` | Ninguna brecha conocida en el DTO de estado |
+| Evaluación | Los formularios diarios de cinco estrellas dependen de un ciclo abierto y un turno compartido real | `domain/evaluations.ts`, `server/evaluation-http.ts`, `app/page.tsx` | Prueba de punta a punta con turnos reales después del despliegue |
+| Resultados | El promedio mensual distingue observaciones reales, ausencias y estimaciones; no cambia automáticamente factores de propina | `domain/monthly-results.ts`, `domain/fairness.ts` | Revisión humana del primer cierre mensual |
+| Administración | Permite editar, suspender y eliminar cuentas, moderar historial y limpiar datos operativos conservando usuarios | `server/admin-auth-service.ts`, `server/d1-admin-auth-repository.ts` | Ejecutar acciones destructivas solo con confirmación explícita y respaldo |
+| Pruebas | La compilación de Sites y 170 pruebas cubren autenticación, autorización, D1, perfiles, evaluaciones, justicia, propinas y contratos de interfaz | `npm test`, 2026-08-25 | Añadir pruebas E2E contra la versión publicada |
 
-## Fortalezas que conviene preservar
+## Fortalezas que deben preservarse
 
-- Dirección visual cálida y apropiada para un equipo humano, sin estética punitiva.
-- Separación conceptual entre trabajador y administración.
-- Criterios comprensibles: trabajo en equipo, actitud, apoyo y servicio.
-- Énfasis visible en reglas, anonimato, atípicos y transparencia.
-- Diseño responsive y respeto por `prefers-reduced-motion`.
-- Interacción de estrellas con `radiogroup` y etiquetas accesibles.
-- La recompensa no se reduce únicamente a dinero.
+- Separación clara entre administración y trabajadores.
+- Evaluaciones privadas basadas en conductas observadas y seis criterios comunes.
+- Jefe de garzones y cajera no evaluables según el acuerdo; la cajera sí puede evaluar.
+- Ninguna sanción, premio o cambio de propina se aplica automáticamente.
+- Historial administrativo auditable y acciones destructivas protegidas.
+- Controles de estrellas accesibles y respeto por `prefers-reduced-motion`.
+- Diseño responsive sin exigir un máximo artificial de seis cuentas.
 
-## Problemas UX priorizados
+## Riesgos y trabajo pendiente
 
-### Críticos
+1. Publicar el commit aprobado como una nueva versión de Sites y comprobar que el artefacto servido coincide con la fuente.
+2. Ejecutar una prueba E2E real con administrador, jefe de garzones, garzón y cajera: acceso, perfil, turno, evaluación, cierre y auditoría.
+3. Verificar respaldo, latencia y disponibilidad de D1 en producción antes de usar acciones de limpieza.
+4. Resolver las advertencias de compatibilidad futura de Vite sobre importaciones JSON y extensiones explícitas.
+5. Mantener revisión humana, motivo registrado y posibilidad de corrección antes de cualquier decisión sobre factores de propina.
 
-1. **La identidad aún no está conectada a la página.** No se concede un rol local, pero falta cargar el usuario autorizado desde el servidor.
-2. **La interfaz todavía no consume el endpoint seguro.** El formulario permanece bloqueado hasta completar cuentas, turnos y D1.
-3. **Resuelto: datos ficticios.** Se eliminaron fechas, puntajes, alertas, recompensas e identidades simuladas; ahora se usan estados vacíos auténticos.
+## Condición de uso operativo
 
-### Altos
-
-1. No existen estados de carga, error de red, reintento, sin permiso ni datos vacíos.
-2. Después de “enviar”, la evaluación sigue editable pese a que el texto afirma lo contrario.
-3. Botones como exportar informe y nueva regla no tienen comportamiento ni estado deshabilitado explicativo.
-4. No hay confirmación ni resumen previo para una acción laboral sensible.
-5. El cierre automático con promedio puede fabricar una opinión que la persona nunca emitió; debe registrarse como ausencia de dato, no como valoración.
-
-### Medios
-
-1. Algunos controles táctiles son menores al objetivo recomendado de 44 px.
-2. El estado de foco no está definido consistentemente para botones y navegación.
-3. Los símbolos usados como iconos no tienen un lenguaje visual uniforme.
-4. La tabla administrativa necesita una alternativa accesible y responsiva que conserve encabezados y contexto.
-5. Falta explicar muestra, confianza y período junto a cada puntuación.
-
-## Riesgos de justicia más importantes
-
-1. **Popularidad:** una persona sociable puede recibir mejores notas que otra igualmente competente.
-2. **Represalia:** una valoración negativa puede provocar otra negativa de vuelta.
-3. **Colusión:** dos o más compañeros pueden intercambiar puntuaciones extremas.
-4. **Oportunidad desigual:** cocina, barra y salón no tienen los mismos observadores ni métricas.
-5. **Muestra pequeña:** pocos votos pueden producir un ranking inestable.
-6. **Sesgo del líder:** un ajuste manual sin motivo puede dominar el resultado.
-7. **Automatización indebida:** un puntaje agregado puede presentarse como certeza y gatillar una sanción.
-8. **Datos sensibles:** comentarios libres pueden revelar salud, vida personal, acusaciones o identidad del evaluador.
-
-## Condición para usar con trabajadores reales
-
-No ingresar datos reales ni tomar decisiones hasta completar como mínimo identidad, autorización en servidor, persistencia, reglas versionadas, muestra mínima, explicación, revisión, auditoría y pruebas específicas. El primer despliegue real debe ser un piloto de sombra sin premios ni sanciones.
+La fuente está preparada para evaluación operativa controlada. La aptitud de la versión pública depende de completar el despliegue y la prueba E2E señalados arriba. Los resultados deben apoyar conversación, aprendizaje y decisión humana; nunca producir sanciones o modificaciones automáticas de propinas.

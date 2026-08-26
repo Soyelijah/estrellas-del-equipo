@@ -134,6 +134,19 @@ test("exposes a sanitized team to workers without other members' private data", 
   assert.equal(serialized.includes("2023-01-01"), false);
 });
 
+test("keeps private team profiles available to an authenticated administrator", async () => {
+  const team = [
+    { id: "u1", displayName: "Garzón", loginIdentifier: "garzon.privado", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 65, email: "garzon@example.com", phone: "+56911111111", bio: "Servicio de salón", hiredOn: "2024-01-01", hasAvatar: true },
+    { id: "u2", displayName: "Compañera", loginIdentifier: "companera.privada", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75, email: "companera@example.com", phone: "+56922222222", bio: "Servicio de barra", hiredOn: "2023-01-01", hasAvatar: false },
+  ];
+  const response = await handleAdminAuthRequest(new Request("https://equipo.example/api/auth/status", { headers: { cookie: "estrellas_session=private-cookie-token" } }), dependencies({ repository: {
+    async findSessionSnapshot() { return { actor: { userId: "admin", displayName: "Jefe", role: "admin", organizationId: "o1", membershipId: "m-admin" }, users: team }; },
+  } }));
+  const body = await response.json();
+  assert.deepEqual(body.users, team);
+  assert.deepEqual(body.team, team.map(({ loginIdentifier: _loginIdentifier, ...member }) => member));
+});
+
 test("loads authenticated status through one session snapshot without sequential user queries", async () => {
   const team = [{ id: "u2", displayName: "Compañera", loginIdentifier: "privado", status: "active", role: "worker", jobTitle: "waiter", tipFactorHundredths: 75 }];
   const response = await handleAdminAuthRequest(
