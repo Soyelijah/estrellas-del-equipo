@@ -132,7 +132,7 @@ function allowedMethodsForPath(path: string): string[] | null {
 
   const userRoute = path.match(/^\/api\/admin\/users\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?:\/(status|password|profile|avatar))?$/iu);
   if (!userRoute) return null;
-  if (!userRoute[1]) return ["PATCH"];
+  if (!userRoute[1]) return ["PATCH", "DELETE"];
   if (userRoute[1] === "avatar") return ["POST", "DELETE"];
   return userRoute[1] === "profile" ? ["PATCH"] : ["POST"];
 }

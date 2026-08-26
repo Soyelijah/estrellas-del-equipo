@@ -238,6 +238,7 @@ test("rejects every unsupported sensitive-route verb before parsing a body or ca
     [`/api/admin/evaluation-shifts/${identifier}`, "PATCH", "DELETE"],
     [`/api/admin/evaluation-submissions/${identifier}/status`, "POST", "PATCH"],
     [`/api/admin/evaluation-history/${identifier}`, "POST", "DELETE"],
+    [`/api/admin/users/${identifier}`, "POST", "PATCH, DELETE"],
   ];
 
   for (const [path, method, allow] of cases) {
