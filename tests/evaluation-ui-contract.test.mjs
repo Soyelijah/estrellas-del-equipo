@@ -120,14 +120,18 @@ test("keeps credential actions compact and touch-safe on mobile", () => {
   assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.credential-card \.primary \{[^}]*min-height: 40px/);
 });
 
-test("turns the mobile service navigation into a complete tab deck without horizontal scrolling", () => {
+test("uses a four-tab banking-style mobile dock with secondary options", () => {
   assert.match(page, /aria-current=\{currentView === item\.id \? "page" : undefined\}/);
-  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav \{[^}]*grid-template-columns: repeat\(6,minmax\(0,1fr\)\)/);
-  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav button \{[^}]*min-width: 0/);
-  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav button span \{[^}]*width: 30px;[^}]*height: 30px/);
-  assert.match(styles, /\.service-rail nav button\.active::after \{[^}]*background: var\(--brass\)/);
-  assert.match(styles, /@media \(max-width: 420px\)[\s\S]*?\.service-rail nav \{[^}]*grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
-  assert.doesNotMatch(styles, /@media \(max-width: 760px\)[\s\S]*?nav \{[^}]*overflow-x: auto/);
+  assert.match(page, /const mobilePrimaryItems = navigationItems\.slice\(0, 3\)/);
+  assert.match(page, /const mobileSecondaryItems = navigationItems\.slice\(3\)/);
+  assert.match(page, /className="mobile-service-nav"/);
+  assert.match(page, /aria-label="Navegación móvil"/);
+  assert.match(page, /aria-controls="mobile-more-panel"/);
+  assert.match(page, /className="mobile-more-options"/);
+  assert.match(styles, /\.mobile-service-nav \{[^}]*position: fixed;[^}]*grid-template-columns: repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(styles, /\.service-rail \.desktop-service-nav, \.service-rail \.profile \{ display: none; \}/);
+  assert.match(styles, /\.mobile-more-panel \{[^}]*bottom: calc\(91px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.doesNotMatch(styles, /\.mobile-service-nav \{[^}]*overflow-x: auto/);
 });
 
 test("gives the administrator audited controls over evaluation history", () => {
