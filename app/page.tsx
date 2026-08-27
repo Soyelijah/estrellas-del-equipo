@@ -496,6 +496,7 @@ export default function Home() {
         Object.fromEntries(new FormData(form)),
         isLogin ? LOGIN_TIMEOUT_MS : undefined,
       );
+      if (slowNotice !== null) window.clearTimeout(slowNotice);
       if (!response.ok) {
         setMessage(friendlyError(result.error));
         return;
@@ -1097,8 +1098,13 @@ export default function Home() {
             <strong>{auth.account.displayName}</strong>
             <span>{isAdmin ? "Administrador" : "Trabajador"}</span>
           </div>
-          <button className="logout-button" onClick={() => void logout()}>
-            Salir
+          <button
+            className="logout-button"
+            type="button"
+            aria-label="Cerrar sesión"
+            onClick={() => void logout()}
+          >
+            Cerrar sesión
           </button>
         </div>
       </aside>

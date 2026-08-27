@@ -148,6 +148,26 @@ test("keeps a slow login from remaining indefinitely in a generic saving state",
   assert.match(page, /fetchAuthState/);
   assert.match(page, /El servidor está tardando más de lo habitual/);
   assert.match(page, /El acceso tardó demasiado/);
+  assert.match(
+    page,
+    /const \{ response, result \} = await requestJson[\s\S]*?if \(slowNotice !== null\) window\.clearTimeout\(slowNotice\);[\s\S]*?if \(!response\.ok\)/,
+  );
+});
+
+test("keeps the signed-in account and logout action available on mobile", () => {
+  assert.match(page, /aria-label="Cerrar sesión"/);
+  assert.match(
+    styles,
+    /@media \(max-width: 760px\)[\s\S]*?\.service-rail \.profile \{[^}]*display: grid/,
+  );
+  assert.match(
+    styles,
+    /@media \(max-width: 760px\)[\s\S]*?\.service-rail \.profile \.logout-button \{[^}]*min-height: 38px/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /@media \(max-width: 760px\)[\s\S]*?\.sidebar-note, \.profile \{[^}]*display: none/,
+  );
 });
 
 test("presents login and administrator recovery in an accessible expanding console", () => {

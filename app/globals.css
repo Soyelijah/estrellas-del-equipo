@@ -508,7 +508,12 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
   .service-rail nav button { justify-content: center; min-width: 0; min-height: 46px; gap: 7px; padding: 8px 6px; border: 1px solid transparent; border-radius: 11px; text-align: center; font-size: 9.5px; white-space: nowrap; transition: transform .2s ease,background .2s ease,border-color .2s ease,box-shadow .2s ease; }
   .service-rail nav button span { flex: 0 0 auto; width: 17px; font-size: 15px; }
   .service-rail nav button.active { border-color: rgba(200,155,69,.42); background: linear-gradient(135deg,rgba(110,38,56,.95),rgba(80,31,42,.92)); box-shadow: inset 0 1px rgba(255,255,255,.07),0 6px 16px rgba(13,6,5,.18); transform: translateY(-1px); }
-  .sidebar-note, .profile { display: none; }
+  .sidebar-note { display: none; }
+  .service-rail .profile { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; margin: 10px 1px 0; padding: 10px 8px 0; border-top: 1px solid rgba(200,155,69,.2); }
+  .service-rail .profile > div:nth-child(2) { min-width: 0; }
+  .service-rail .profile strong { overflow: hidden; text-overflow: ellipsis; }
+  .service-rail .profile .logout-button { min-height: 38px; margin-left: 0; padding: 0 12px; border-color: rgba(200,155,69,.34); border-radius: 10px; color: #fff7e8; background: rgba(200,155,69,.09); font-size: 9px; font-weight: 800; letter-spacing: .04em; white-space: nowrap; transition: background .2s ease,border-color .2s ease,transform .2s ease; }
+  .service-rail .profile .logout-button:hover { border-color: rgba(200,155,69,.58); background: rgba(200,155,69,.16); transform: translateY(-1px); }
   .content { padding: 20px 14px 35px; }
   .topbar { align-items: flex-start; }.topbar h1 { font-size: 27px; }.top-actions .icon-button, .top-actions .outline { display: none; }
   .top-actions .primary { padding: 10px 11px; font-size: 10px; }
