@@ -504,10 +504,15 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
   .sidebar { position: relative; width: 100%; height: auto; padding: 13px 14px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { padding: 0 5px 11px; }.brand-mark { width: 35px; height: 35px; font-size: 38px; }
   .role-switch { margin-bottom: 8px; }
-  .service-rail nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; overflow: visible; padding: 7px; border: 1px solid rgba(200,155,69,.19); border-radius: 16px; background: rgba(255,255,255,.035); box-shadow: inset 0 1px rgba(255,255,255,.035),0 10px 26px rgba(0,0,0,.12); }
-  .service-rail nav button { justify-content: center; min-width: 0; min-height: 46px; gap: 7px; padding: 8px 6px; border: 1px solid transparent; border-radius: 11px; text-align: center; font-size: 9.5px; white-space: nowrap; transition: transform .2s ease,background .2s ease,border-color .2s ease,box-shadow .2s ease; }
-  .service-rail nav button span { flex: 0 0 auto; width: 17px; font-size: 15px; }
-  .service-rail nav button.active { border-color: rgba(200,155,69,.42); background: linear-gradient(135deg,rgba(110,38,56,.95),rgba(80,31,42,.92)); box-shadow: inset 0 1px rgba(255,255,255,.07),0 6px 16px rgba(13,6,5,.18); transform: translateY(-1px); }
+  .service-rail nav { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 4px; overflow: visible; padding: 6px; border: 1px solid rgba(200,155,69,.22); border-radius: 18px; background: linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.018)); box-shadow: inset 0 1px rgba(255,255,255,.055),0 12px 30px rgba(0,0,0,.16); }
+  .service-rail nav button { position: relative; flex-direction: column; justify-content: center; min-width: 0; min-height: 68px; gap: 5px; padding: 7px 3px 9px; border: 1px solid transparent; border-radius: 14px; color: #cbbdaf; text-align: center; font-size: 9px; font-weight: 700; line-height: 1.1; white-space: nowrap; transition: transform .24s ease,color .24s ease,background .24s ease,border-color .24s ease,box-shadow .24s ease; }
+  .service-rail nav button span { display: grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px; border: 1px solid rgba(200,155,69,.16); border-radius: 10px; color: #d9b96f; background: rgba(200,155,69,.065); font-size: 15px; line-height: 1; transition: color .24s ease,background .24s ease,border-color .24s ease,transform .24s ease; }
+  .service-rail nav button::after { content: ""; position: absolute; right: 28%; bottom: 4px; left: 28%; height: 2px; border-radius: 999px; background: transparent; transform: scaleX(.35); transition: background .24s ease,transform .24s ease; }
+  .service-rail nav button:hover { color: #fff7e8; background: rgba(255,255,255,.045); transform: translateY(-1px); }
+  .service-rail nav button:hover span { border-color: rgba(200,155,69,.34); background: rgba(200,155,69,.11); transform: translateY(-1px); }
+  .service-rail nav button.active { border-color: rgba(200,155,69,.46); color: #fffaf0; background: linear-gradient(155deg,rgba(110,38,56,.97),rgba(75,28,39,.94)); box-shadow: inset 0 1px rgba(255,255,255,.09),0 7px 18px rgba(16,7,7,.23); transform: none; }
+  .service-rail nav button.active span { border-color: rgba(231,192,105,.52); color: #ffe1a0; background: rgba(200,155,69,.16); box-shadow: 0 4px 12px rgba(13,6,5,.2); }
+  .service-rail nav button.active::after { background: var(--brass); transform: scaleX(1); }
   .sidebar-note { display: none; }
   .service-rail .profile { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; margin: 10px 1px 0; padding: 10px 8px 0; border-top: 1px solid rgba(200,155,69,.2); }
   .service-rail .profile > div:nth-child(2) { min-width: 0; }
@@ -537,8 +542,9 @@ nav button.active { color: var(--terracotta-dark); background: linear-gradient(1
 
 @media (max-width: 420px) {
   .sidebar { padding-inline: 10px; }
-  .service-rail nav { gap: 4px; padding: 5px; }
-  .service-rail nav button { gap: 4px; padding-inline: 4px; font-size: 8.5px; }
+  .service-rail nav { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; padding: 6px; }
+  .service-rail nav button { min-height: 62px; gap: 4px; padding-inline: 4px; font-size: 8.5px; }
+  .service-rail nav button span { width: 27px; height: 27px; font-size: 14px; }
   .service-rail nav button span { width: 14px; font-size: 14px; }
 }
 
