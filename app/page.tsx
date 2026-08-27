@@ -308,6 +308,7 @@ export default function Home() {
   const [workspace, setWorkspace] = useState<EvaluationWorkspace | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceUnavailable, setWorkspaceUnavailable] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [shiftConfirmation, setShiftConfirmation] =
     useState<ShiftConfirmation | null>(null);
   const [shiftRemoval, dispatchShiftRemoval] = useReducer(
@@ -372,6 +373,14 @@ export default function Home() {
     document.addEventListener("contextmenu", preventContextMenu);
     return () => document.removeEventListener("contextmenu", preventContextMenu);
   }, []);
+  useEffect(() => {
+    if (!mobileMoreOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMoreOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileMoreOpen]);
 
   async function requestJson(
     path: string,
@@ -1006,6 +1015,16 @@ export default function Home() {
     ? navigationForRole(auth.account.role).map((item) => item.id as AppView)
     : ["inicio" as AppView];
   const currentView = allowedViews.includes(view) ? view : "inicio";
+  const navigationItems = navigationForRole(auth.account?.role ?? "worker");
+  const mobilePrimaryItems = navigationItems.slice(0, 3);
+  const mobileSecondaryItems = navigationItems.slice(3);
+  const openView = (target: AppView) => {
+    setView(target);
+    setMobileMoreOpen(false);
+    if (target === "auditoria") void loadAudit();
+    if (target === "operacion") void loadOperations();
+    if (target === "evaluaciones") void loadEvaluationWorkspace();
+  };
   const tipSimulation = useMemo(
     () =>
       activeTeam.length === 0
@@ -1068,18 +1087,13 @@ export default function Home() {
             <i key={index} />
           ))}
         </div>
-        <nav aria-label="Navegación principal">
-          {navigationForRole(auth.account.role).map((item) => (
+        <nav className="desktop-service-nav" aria-label="Navegación principal">
+          {navigationItems.map((item) => (
             <button
               key={item.id}
               className={currentView === item.id ? "active" : ""}
               aria-current={currentView === item.id ? "page" : undefined}
-              onClick={() => {
-                setView(item.id as AppView);
-                if (item.id === "auditoria") void loadAudit();
-                if (item.id === "operacion") void loadOperations();
-                if (item.id === "evaluaciones") void loadEvaluationWorkspace();
-              }}
+              onClick={() => openView(item.id as AppView)}
             >
               <span>{item.icon}</span>
               {item.label}
@@ -1108,6 +1122,97 @@ export default function Home() {
           </button>
         </div>
       </aside>
+      <div
+        className={`mobile-more-layer ${mobileMoreOpen ? "is-open" : ""}`}
+        aria-hidden={!mobileMoreOpen}
+      >
+        <button
+          className="mobile-more-backdrop"
+          type="button"
+          aria-label="Cerrar más opciones"
+          onClick={() => setMobileMoreOpen(false)}
+        />
+        <section
+          id="mobile-more-panel"
+          className="mobile-more-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Más opciones"
+        >
+          <header>
+            <div className="avatar small">{initials(auth.account.displayName)}</div>
+            <div>
+              <strong>{auth.account.displayName}</strong>
+              <span>{isAdmin ? "Administración" : "Cuenta personal"}</span>
+            </div>
+            <button
+              className="mobile-more-close"
+              type="button"
+              aria-label="Cerrar más opciones"
+              onClick={() => setMobileMoreOpen(false)}
+            >
+              ×
+            </button>
+          </header>
+          <div className="mobile-more-options">
+            {!isAdmin && (
+              <button type="button" onClick={() => openView("inicio")}>
+                <span>◌</span>
+                <strong>Mi perfil</strong>
+                <small>Datos personales</small>
+              </button>
+            )}
+            {mobileSecondaryItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={currentView === item.id ? "active" : ""}
+                onClick={() => openView(item.id as AppView)}
+              >
+                <span>{item.icon}</span>
+                <strong>{item.label}</strong>
+                <small>Abrir sección</small>
+              </button>
+            ))}
+          </div>
+          <button
+            className="mobile-sheet-logout"
+            type="button"
+            onClick={() => void logout()}
+          >
+            <span>↗</span>
+            Cerrar sesión
+          </button>
+        </section>
+      </div>
+      <nav className="mobile-service-nav" aria-label="Navegación móvil">
+        {mobilePrimaryItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={currentView === item.id ? "active" : ""}
+            aria-current={currentView === item.id ? "page" : undefined}
+            onClick={() => openView(item.id as AppView)}
+          >
+            <span>{item.icon}</span>
+            {item.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={
+            mobileMoreOpen || mobileSecondaryItems.some(({ id }) => id === currentView)
+              ? "active"
+              : ""
+          }
+          aria-expanded={mobileMoreOpen}
+          aria-controls="mobile-more-panel"
+          onClick={() => setMobileMoreOpen((open) => !open)}
+        >
+          <span>•••</span>
+          Más
+        </button>
+      </nav>
       <section className="content service-desk">
         <div className="data-banner" role="status">
           <strong>Sesión real activa</strong>
