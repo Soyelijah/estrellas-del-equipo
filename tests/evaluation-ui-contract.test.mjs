@@ -122,8 +122,11 @@ test("keeps credential actions compact and touch-safe on mobile", () => {
 
 test("turns the mobile service navigation into a complete tab deck without horizontal scrolling", () => {
   assert.match(page, /aria-current=\{currentView === item\.id \? "page" : undefined\}/);
-  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav \{[^}]*grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav \{[^}]*grid-template-columns: repeat\(6,minmax\(0,1fr\)\)/);
   assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav button \{[^}]*min-width: 0/);
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.service-rail nav button span \{[^}]*width: 30px;[^}]*height: 30px/);
+  assert.match(styles, /\.service-rail nav button\.active::after \{[^}]*background: var\(--brass\)/);
+  assert.match(styles, /@media \(max-width: 420px\)[\s\S]*?\.service-rail nav \{[^}]*grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
   assert.doesNotMatch(styles, /@media \(max-width: 760px\)[\s\S]*?nav \{[^}]*overflow-x: auto/);
 });
 
